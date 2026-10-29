@@ -151,7 +151,14 @@ Use one row per race run. Import a CSV or TSV file, paste rows in, or type them 
 
 Blank cells are fine; each race uses whichever products it has.
 
-Sheet notation is understood. Leading flag letters are ignored (`F7` is read as 7). For trailing symbols, `-` means −¼, `+` means +¼, and `"` or `½` means +½. Publishers' legends differ, so if your sheets use these symbols differently, change `parseFigure` in `lib/figures.js`.
+Ragozin notation follows the Ragozin symbol sheet:
+
+- Symbols before the figure (track, surface, weather, Lasix and pace notes such as `=`, `.=`, `..`, `◇`, `P~`) are skipped. `=` marks turf and `◇` marks Polytrack, which fills in the surface.
+- Right after the figure, `+` is +¼, `-` is −¼ and `"` is +½, applied arithmetically, so `-2"` = −1.5.
+- Trouble and equipment codes after that (`&`, `s`, `D`, `w`, `<`, `[`, `V` and so on) are ignored.
+- `XX` (did not finish) has no figure.
+
+The reader takes the date from the sheet's year column, month row and the day in the far-right code (`10AP29` = 29th). The sheet's own track code is kept separately as `sheetTrack`, so codes like `KE` vs `KEE` never block a match. In the review step, any figure more than 15 points (after conversion) from the other figures for the same race is marked **check**.
 
 **Export CSV** writes every row back out with its unified figure, spread and the number of sources used.
 

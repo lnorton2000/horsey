@@ -39,7 +39,7 @@ test('normalizeExtraction validates and maps figures to the product column', () 
   });
   assert.equal(r.product, 'ragozin');
   assert.equal(r.skipped, 3);
-  assert.deepEqual(r.rows[0], { horse: 'Copper Comet', date: '2026-08-13', month: '2026-08', track: 'SAR', distance: '6f', surface: 'D', ragozin: '4"' });
+  assert.deepEqual(r.rows[0], { horse: 'Copper Comet', date: '2026-08-13', month: '2026-08', sheetTrack: 'SAR', distance: '6f', surface: 'D', ragozin: '4"' });
   assert.deepEqual(r.rows[1], { horse: 'Iron Quill', month: '2026-07', ragozin: '11-' });
   assert.equal(X.normalizeExtraction({ product: 'mystery', races: [{ horse: 'A', figure: '90' }] }, 'beyer').rows[0].beyer, '90');
   assert.equal(X.normalizeExtraction({ product: 'mystery', races: [{ horse: 'A', figure: '90' }] }).rows.length, 0);
@@ -60,4 +60,16 @@ test('resolveMonthOnlyDates fills a day only when the match is unique', () => {
   assert.equal(rows[0].date, '2026-08-13');
   assert.equal(rows[1].date, undefined, 'two July races: ambiguous');
   assert.equal(rows[2].date, undefined, 'track mismatch');
+});
+
+test('Ragozin rows keep the sheet track aside and take surface from symbols', () => {
+  const r = X.normalizeExtraction({ product: 'ragozin', races: [
+    { horse: 'A', date: '2026-08-29', track: 'AP', figure: '.=12-' },
+    { horse: 'A', date: '2026-07-29', track: 'AP', surface: 'D', figure: '14+w' },
+  ] });
+  assert.deepEqual(r.rows[0], { horse: 'A', date: '2026-08-29', month: '2026-08', sheetTrack: 'AP', surface: 'T', ragozin: '.=12-' });
+  assert.equal(r.rows[1].surface, 'D');
+  const p = X.buildPrompt({ products: ['beyer', 'thoromanager', 'ragozin'], text: 'x' });
+  assert.match(p, /most recent race is at the top of the rightmost column/);
+  assert.match(p, /"10AP29" = \$10,000 claimer at AP on the 29th/);
 });

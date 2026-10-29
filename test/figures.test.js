@@ -26,7 +26,7 @@ test('parseFigure handles sheet notation', () => {
   assert.equal(F.parseFigure('9½'), 9.5);
   assert.equal(F.parseFigure('F7'), 7);
   assert.equal(F.parseFigure('-2'), -2);
-  assert.equal(F.parseFigure('-2"'), -2.5);
+  assert.equal(F.parseFigure('-2"'), -1.5);
   assert.equal(F.parseFigure(''), null);
   assert.equal(F.parseFigure('n/a'), null);
 });
@@ -238,4 +238,16 @@ test('cleanupRaces leaves genuinely different runs apart', () => {
   ];
   const c = F.cleanupRaces(races, { today: '2026-10-29', sources: F.cloneSources().map((s) => Object.assign(s, { enabled: true })) });
   assert.equal(c.total, 0, 'different race and finish; two equally close candidates');
+});
+
+test('parseFigure reads every Ragozin legend symbol', () => {
+  const cases = {
+    '.=12-': 11.75, '..9"': 9.5, 'P~14': 14, 'X~14+': 14.25, '◇11': 11, '^=9"&': 9.5, '14+w': 14.25,
+    '12"D<': 12.5, "'11": 11, '../15': 15, 'r:13+s': 13.25, 'F7+': 7.25, '-2-': -2.25, '.12': 12, ':=10[': 10, '~8"Y': 8.5,
+  };
+  for (const [t, v] of Object.entries(cases)) assert.equal(F.parseFigure(t), v, t);
+  assert.equal(F.parseFigure('XX'), null);
+  assert.equal(F.sheetSurface('.=12-'), 'T');
+  assert.equal(F.sheetSurface('◇11'), 'S');
+  assert.equal(F.sheetSurface('12-'), null);
 });

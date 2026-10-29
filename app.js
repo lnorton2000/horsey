@@ -775,16 +775,35 @@
     }
   }
 
+  /**
+   * How far a just-read figure sits from the figures already known for the
+   * same race (saved, or read from another file in this batch), after
+   * conversion. A big gap usually means a misread or a race put on the wrong date.
+   */
+  const CHECK_GAP = 15;
+  function rawGap(r, others) {
+    const sources = src();
+    const mine = F.combineRace(Object.assign({}, r, { distance: r.distance || (others[0] && others[0].distance) }), sources);
+    const known = others.map((o) => F.combineRace(o, sources)).filter(Boolean);
+    if (!mine || !known.length) return null;
+    return mine.unified - known.reduce((a, c) => a + c.unified, 0) / known.length;
+  }
+
   function rawStatus(r) {
     if (!r.date) return `<span class="pill warn">no exact date${r.month ? ` (${esc(r.month)})` : ''}</span>`;
     const k = F.raceKey(r);
-    const saved = state.races.some((s) => F.raceKey(s) === k);
+    const saved = state.races.filter((s) => F.raceKey(s) === k);
+    const batch = raw.rows.filter((o) => o !== r && o._checked && F.raceKey(o) === k && !X.PRODUCT_IDS.some((p) => o[p] != null && r[p] != null));
     const tag = r.dateFrom === 'matched' ? ' (day matched)' : '';
-    if (saved) return `<span class="pill ok">adds to a saved race${tag}</span>`;
+    const gap = rawGap(r, saved.concat(batch));
+    const check = gap != null && Math.abs(gap) > CHECK_GAP
+      ? ` <span class="pill warn" title="After conversion this figure is ${Math.abs(gap).toFixed(0)} points ${gap > 0 ? 'better' : 'worse'} than the other figures for this race. Check the figure and the date against the sheet.">check: ${Math.abs(gap).toFixed(0)} pts off</span>`
+      : '';
+    if (saved.length) return `<span class="pill ok">adds to a saved race${tag}</span>${check}`;
     const first = raw.rows.find((o) => o._checked && F.raceKey(o) === k);
     if (first && first !== r) {
       const p = X.PRODUCT_IDS.find((id) => first[id] != null);
-      return `<span class="pill ok">same race as the ${esc((state.sources.find((s) => s.id === p) || { short: p }).short)} row${tag}</span>`;
+      return `<span class="pill ok">same race as the ${esc((state.sources.find((s) => s.id === p) || { short: p }).short)} row${tag}</span>${check}`;
     }
     return `<span class="pill">new race${tag}</span>`;
   }
@@ -810,7 +829,9 @@
     const cardsSeen = new Set(raw.entries.map((e) => C.cardId(e.track, e.date)));
     $('#raw-save').disabled = (!checked && !raw.entries.length) || raw.running;
     if (!checked && raw.entries.length) $('#raw-save').textContent = 'Save entries';
+    const flagged = raw.rows.filter((r) => /check: /.test(rawStatus(r))).length;
     $('#raw-summary').textContent = `${raw.rows.length} past races read.` +
+      (flagged ? ` ${flagged} figure${flagged === 1 ? ' is' : 's are'} marked "check": more than ${CHECK_GAP} points from the other figures for the same race, so look at ${flagged === 1 ? 'it' : 'them'} on the sheet before saving.` : '') +
       (raw.entries.length ? ` Also found ${raw.entries.length} entries (post positions) on ${cardsSeen.size} race card${cardsSeen.size === 1 ? '' : 's'}; they're saved with the races.` : '') +
       (undated ? ` ${undated} have no exact date. They'll still be saved and rated, but they can't combine with the same race from another product; type a date (YYYY-MM-DD) if you know it.` : '') +
       ' Fix anything that looks wrong before saving.';
