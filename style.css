@@ -131,3 +131,16 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .pill.ok { color: var(--good); }
 .pill.warn { color: var(--warn); }
 #raw-review { margin-bottom: 20px; }
+.race { margin: 18px 0 26px; }
+.race-head { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: baseline; margin-bottom: 8px; }
+.race-head h3 { margin: 0; font-size: 1.15rem; }
+.race-head > span:not(.pill) { color: var(--muted); }
+.post { display: inline-block; min-width: 1.9em; text-align: center; font-weight: 700; border-radius: 4px; padding: 1px 4px; background: var(--ink); color: var(--bg); font-variant-numeric: tabular-nums; }
+.style { display: inline-block; min-width: 1.6em; text-align: center; font-weight: 700; border-radius: 4px; padding: 0 4px; border: 1px solid currentColor; font-size: 12px; }
+.style-E { color: var(--bad); }
+.style-P { color: var(--warn); }
+.style-C { color: var(--accent); }
+.pill.up { color: var(--good); }
+.pill.down { color: var(--bad); }
+.empty { background: var(--panel); border: 1px dashed var(--line); border-radius: 10px; padding: 18px 20px; max-width: 70ch; }
+.empty p { color: var(--muted); margin: 6px 0 0; }

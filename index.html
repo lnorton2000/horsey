@@ -18,16 +18,30 @@
       <button id="migrate-no">Not now</button>
     </div>
     <nav>
-      <button data-tab="convert" class="active">Quick convert</button>
+      <button data-tab="card" class="active">Race card</button>
       <button data-tab="figures">Figures</button>
       <button data-tab="rankings">Rankings</button>
       <button data-tab="calibration">Calibration</button>
+      <button data-tab="convert">Quick convert</button>
     </nav>
   </header>
 
   <main>
+    <!-- Race card -->
+    <section id="tab-card" class="tab active">
+      <h2>Race card</h2>
+      <div class="row" id="card-controls" hidden>
+        <label>Card <select id="card-select"></select></label>
+        <button id="card-pdf" class="primary-btn">Download PDF report</button>
+        <label><input type="checkbox" id="pdf-detail" checked> Include each horse's past races</label>
+        <button id="card-delete" class="danger edit-only">Delete this card</button>
+      </div>
+      <p class="hint">Horses by race and post position. <b>Rating</b> is the unified figure (Beyer scale). <b>Agree</b> runs 0 to 1: how closely the products' figures matched on the same runs, 1 being total agreement. <b>Order agreement</b> says whether the products rank the field the same way. <b>Style</b>: E early, P presser, C closer. Click a horse for its past races. Viewing and downloading never uses Claude.</p>
+      <div id="card-out"></div>
+    </section>
+
     <!-- Quick convert -->
-    <section id="tab-convert" class="tab active">
+    <section id="tab-convert" class="tab">
       <h2>Quick convert</h2>
       <p class="hint">Translate one figure into every other product's scale.</p>
       <div class="row">
@@ -141,6 +155,7 @@
 
   <script src="lib/figures.js"></script>
   <script src="lib/extract.js"></script>
+  <script src="lib/card.js"></script>
   <script src="lib/sample-data.js"></script>
   <script src="app.js"></script>
 </body>

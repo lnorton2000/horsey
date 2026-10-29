@@ -1,7 +1,8 @@
-/* global Figures, SAMPLE_CSV */
+/* global Figures, Card, SAMPLE_CSV, SAMPLE_ENTRIES_CSV */
 (function () {
   'use strict';
   const F = Figures;
+  const C = Card;
   const LOCAL_KEY = 'horsey.v1';      // races + calibration when running outside claude.ai
   const PREFS_KEY = 'horsey.prefs.v1'; // per-browser UI conveniences only
   const MAX_TABLE_ROWS = 300;
@@ -13,7 +14,7 @@
   const readJSON = (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } };
   const writeJSON = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* storage unavailable */ } };
 
-  const state = { races: [], sources: F.cloneSources(), fitReport: null };
+  const state = { races: [], cards: {}, sources: F.cloneSources(), fitReport: null };
   const prefs = Object.assign({ open: {} }, readJSON(PREFS_KEY));
 
   function withNewSources(sources) {
@@ -46,6 +47,7 @@
     db: null,
     downloads: null,
     serverHorses: new Map(), // doc id -> JSON of races as last seen/written
+    serverCards: new Map(),  // card id -> JSON of the card as last seen/written
     serverSettings: null,
     writing: new Map(),      // doc id -> {running, again}
     active: 0,
@@ -92,6 +94,10 @@
         const json = groups.has(id) ? JSON.stringify(groups.get(id)) : null;
         if (json !== (store.serverHorses.get(id) ?? null)) scheduleWrite(id);
       }
+      for (const id of new Set([...Object.keys(state.cards), ...store.serverCards.keys()])) {
+        const json = state.cards[id] ? JSON.stringify(state.cards[id]) : null;
+        if (json !== (store.serverCards.get(id) ?? null)) scheduleWrite('card:' + id);
+      }
       const settings = JSON.stringify({ sources: state.sources, fitReport: state.fitReport });
       if (settings !== store.serverSettings) scheduleWrite('@settings');
       cloudStatus();
@@ -125,9 +131,16 @@
   async function writeDoc(id) {
     // Always writes the latest state, so a burst of edits collapses into one write.
     let op, json;
+    let cardId = null;
     if (id === '@settings') {
       json = JSON.stringify({ sources: state.sources, fitReport: state.fitReport });
       op = () => store.db.doc('settings/main').set(JSON.parse(json));
+    } else if (id.startsWith('card:')) {
+      cardId = id.slice(5);
+      const card = state.cards[cardId];
+      json = card ? JSON.stringify(card) : null;
+      const ref = store.db.doc('cards/' + cardId);
+      op = card ? () => ref.set(JSON.parse(json)) : () => ref.delete();
     } else {
       const races = groupByHorse(state.races).get(id);
       json = races ? JSON.stringify(races) : null;
@@ -138,6 +151,7 @@
       try {
         await op();
         if (id === '@settings') store.serverSettings = json;
+        else if (cardId) { if (json == null) store.serverCards.delete(cardId); else store.serverCards.set(cardId, json); }
         else if (json == null) store.serverHorses.delete(id);
         else store.serverHorses.set(id, json);
         store.failed = false;
@@ -168,6 +182,7 @@
       state.races = saved.races || [];
       state.sources = withNewSources(saved.sources);
       state.fitReport = saved.fitReport || null;
+      state.cards = saved.cards || {};
     }
     try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) { /* optional */ }
     setStatus(`Saved in this browser · ${state.races.length} races`, 'ok');
@@ -206,6 +221,19 @@
       cloudStatus();
       if (JSON.stringify(races) !== before) renderAll();
     }, () => setStatus('Lost the connection to your saved data. Reload the page to reconnect.', 'bad'));
+
+    db.collection('cards').onSnapshot((snap) => {
+      const cards = {};
+      store.serverCards = new Map();
+      for (const d of snap.docs) {
+        const body = d.data();
+        if (!body) continue;
+        store.serverCards.set(d.id, JSON.stringify(body));
+        cards[d.id] = JSON.parse(JSON.stringify(body));
+      }
+      if ([...store.writing.keys()].some((k) => k.startsWith('card:'))) return;
+      if (JSON.stringify(cards) !== JSON.stringify(state.cards)) { state.cards = cards; renderAll(); }
+    }, () => {});
 
     db.doc('settings/main').onSnapshot((snap) => {
       if (!snap.exists) return;
@@ -273,13 +301,14 @@
     });
   }
 
-  async function offerFile(filename, text, type) {
+  async function offerFile(filename, data, type) {
+    const blob = data instanceof Blob ? data : new Blob([data], { type });
     if (store.downloads) {
-      try { await store.downloads.save({ filename, data: new Blob([text], { type }) }); } catch (e) { /* declined */ }
+      try { await store.downloads.save({ filename, data: blob }); } catch (e) { /* declined */ }
       return;
     }
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([text], { type }));
+    a.href = URL.createObjectURL(blob);
     a.download = filename;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
@@ -394,7 +423,12 @@
     const first = document.querySelector('#fig-table input[data-key="horse"]');
     if (first) first.focus();
   });
-  $('#load-sample').addEventListener('click', () => importText(SAMPLE_CSV, 'the fictional sample'));
+  $('#load-sample').addEventListener('click', () => {
+    const races = importText(SAMPLE_CSV, 'the fictional sample', true);
+    const cards = importEntries(F.parseCSV(SAMPLE_ENTRIES_CSV).races, 'sample race card');
+    flash(races + ' ' + cards);
+    persist();
+  });
   $('#paste-toggle').addEventListener('click', () => { $('#paste-box').hidden = !$('#paste-box').hidden; });
   $('#paste-apply').addEventListener('click', () => {
     const text = $('#paste-text').value;
@@ -422,9 +456,23 @@
   });
   $('#export-csv').addEventListener('click', () => offerFile('unified-figures.csv', F.toCSV(state.races, state.sources), 'text/csv'));
 
+  /** CSV with race + post columns: today's entries. Track and date may be columns too. */
+  function importEntries(rows, label) {
+    const r = C.mergeEntries(state.cards, rows);
+    state.cards = r.cards;
+    if (r.changedIds.length) ui.card = r.changedIds[0];
+    const skipped = rows.length - r.added - r.updated;
+    return `${label}: ${r.added} entries added, ${r.updated} updated` + (skipped ? ` (${skipped} unchanged or missing a track/date)` : '') + '.';
+  }
+
   function importText(text, label, batch) {
     if (!canEdit()) return '';
     const { races, unknownColumns } = F.parseCSV(text);
+    if (races.some((r) => r.post && r.race)) {
+      const note = importEntries(races, label);
+      if (!batch) { flash(note); persist(); }
+      return note;
+    }
     const r = F.mergeRaces(state.races, races);
     state.races = r.races;
     const parts = [`${label}: ${r.added} new race${r.added === 1 ? '' : 's'}`];
@@ -440,7 +488,7 @@
   /* ---------- raw files: PDFs and photos read by Claude ---------- */
   const X = window.Extract;
   const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
-  const raw = { sample: null, limits: null, ctl: null, rows: [], running: false, seq: 0 };
+  const raw = { sample: null, limits: null, ctl: null, rows: [], entries: [], running: false, seq: 0 };
 
   async function initSample() {
     try { raw.sample = window.claude ? await window.claude.use('sample') : null; } catch (e) { raw.sample = null; }
@@ -571,7 +619,7 @@
           if (kind === 'text') {
             const text = await f.text();
             const parsed = F.parseCSV(text);
-            if (hasFigureColumns(parsed.races)) { notes.push(importText(text, f.name, true)); continue; }
+                  if (hasFigureColumns(parsed.races)) { notes.push(importText(text, f.name, true)); continue; }
             if (raw.sample) jobs.push(...textJobs(text, f.name));
             else notes.push(`${f.name}: no figure columns found.`);
           } else if (!raw.sample) {
@@ -598,6 +646,7 @@
           const answer = await raw.sample.json(prompt, opts);
           const res = X.normalizeExtraction(answer, product === 'auto' ? null : product);
           for (const r of res.rows) raw.rows.push(Object.assign(r, { _id: ++raw.seq, _src: job.source, _checked: !!r.date }));
+          raw.entries.push(...res.entries);
           found += res.rows.length;
           renderRaw();
         } catch (e) {
@@ -651,7 +700,7 @@
 
   function renderRaw() {
     const box = $('#raw-review');
-    if (!raw.rows.length) { box.hidden = true; return; }
+    if (!raw.rows.length && !raw.entries.length) { box.hidden = true; return; }
     box.hidden = false;
     const name = (id) => (state.sources.find((s) => s.id === id) || { short: id }).short;
     const head = '<tr><th></th><th>Horse</th><th>Date</th><th>Trk</th><th>Dist</th><th>Product</th><th>Figure</th><th>Status</th><th>From</th></tr>';
@@ -667,8 +716,11 @@
     const checked = raw.rows.filter((r) => r._checked).length;
     const undated = raw.rows.filter((r) => !r.date).length;
     $('#raw-save').textContent = `Save ${checked} checked race${checked === 1 ? '' : 's'}`;
-    $('#raw-save').disabled = !checked || raw.running;
-    $('#raw-summary').textContent = `${raw.rows.length} races read.` +
+    const cardsSeen = new Set(raw.entries.map((e) => C.cardId(e.track, e.date)));
+    $('#raw-save').disabled = (!checked && !raw.entries.length) || raw.running;
+    if (!checked && raw.entries.length) $('#raw-save').textContent = 'Save entries';
+    $('#raw-summary').textContent = `${raw.rows.length} past races read.` +
+      (raw.entries.length ? ` Also found ${raw.entries.length} entries (post positions) on ${cardsSeen.size} race card${cardsSeen.size === 1 ? '' : 's'}; they're saved with the races.` : '') +
       (undated ? ` ${undated} have no date yet: type one in (YYYY-MM-DD) and check the box, or leave them unchecked.` : '') +
       ' Fix anything that looks wrong before saving.';
   }
@@ -700,13 +752,22 @@
     const res = F.mergeRaces(state.races, picked);
     state.races = res.races;
     raw.rows = raw.rows.filter((r) => !r._checked);
-    flash(`Saved: ${res.added} new races, ${res.updated} existing races got new figures, ${res.unchanged} were already saved.`);
+    let entryNote = '';
+    if (raw.entries.length) {
+      const er = C.mergeEntries(state.cards, raw.entries);
+      state.cards = er.cards;
+      raw.entries = [];
+      entryNote = ` Race cards: ${er.added} entries added, ${er.updated} updated. See the Race card tab.`;
+      if (er.changedIds.length) ui.card = er.changedIds[0];
+    }
+    flash(`Saved: ${res.added} new races, ${res.updated} existing races got new figures, ${res.unchanged} were already saved.` + entryNote);
     $('#raw-progress').hidden = true;
     persist();
     renderRaw();
   });
-  confirmButton($('#raw-discard'), () => `Discard ${raw.rows.length} unsaved races?`, () => {
+  confirmButton($('#raw-discard'), () => `Discard ${raw.rows.length + raw.entries.length} unsaved items?`, () => {
     raw.rows = [];
+    raw.entries = [];
     $('#raw-progress').hidden = true;
     renderRaw();
   });
@@ -728,9 +789,227 @@
     processRawFiles(files);
   });
 
+  /* ---------- race card ---------- */
+  const ui = { card: prefs.card || null, openCard: {} };
+  const STYLE_NAME = { E: 'Early', P: 'Presser', C: 'Closer' };
+  const SURFACE_NAME = { D: 'Dirt', T: 'Turf', S: 'Synthetic' };
+
+  function cardOptions() {
+    const ids = Object.keys(state.cards).sort((a, b) => (state.cards[b].date || '').localeCompare(state.cards[a].date || '') || a.localeCompare(b));
+    if (!ids.includes(ui.card)) ui.card = ids[0] || null;
+    return ids;
+  }
+
+  function agreeLabel(v) {
+    if (v == null) return { text: '–', cls: '', word: 'one product' };
+    return v >= 0.8 ? { text: v.toFixed(2), cls: 'up', word: 'agree' } : v >= 0.5 ? { text: v.toFixed(2), cls: '', word: 'mixed' } : { text: v.toFixed(2), cls: 'down', word: 'conflict' };
+  }
+
+  function styleTitle(st) {
+    if (!st.style) return 'No running-line data yet';
+    if (st.source === 'printed') return 'From the style printed in the PPs';
+    return `${STYLE_NAME[st.style]}: E ${st.counts.E}, P ${st.counts.P}, C ${st.counts.C} over ${st.n} races`;
+  }
+
+  function currentReport() {
+    const lastN = Math.max(1, +$('#opt-lastn').value || 6);
+    const decay = Math.min(1, Math.max(0.3, +$('#opt-decay').value || 0.8));
+    return ui.card && state.cards[ui.card] ? C.buildCard(ui.card, state.cards[ui.card], state.races, state.sources, { lastN, decay }) : null;
+  }
+
+  function renderCard() {
+    const ids = cardOptions();
+    const sel = $('#card-select');
+    sel.innerHTML = ids.map((id) => {
+      const c = state.cards[id];
+      const n = Object.keys(c.races || {}).length;
+      return `<option value="${esc(id)}">${esc(c.track || '?')} · ${esc(c.date)} · ${n} race${n === 1 ? '' : 's'}</option>`;
+    }).join('');
+    sel.value = ui.card || '';
+    const has = !!ids.length;
+    $('#card-controls').hidden = !has;
+    $('#card-delete').hidden = !has || !canEdit();
+    const rep = currentReport();
+    if (!rep) {
+      $('#card-out').innerHTML = `<div class="empty"><strong>No race cards yet</strong>
+        <p>Drop the PP or sheet files for a card on the <b>Figures</b> tab. Claude picks up each horse's race number and post position from the PP headers and builds the card here.</p>
+        <p>You can also import a CSV with <code>track, date, race, post, horse</code> columns, or load the fictional sample.</p></div>`;
+      return;
+    }
+    const srcs = enabled();
+    $('#card-out').innerHTML = rep.races.map((r) => {
+      const order = r.order ? agreeLabel(r.order.score) : null;
+      const head = `<div class="race-head"><h3>Race ${esc(r.race)}</h3>
+        <span>${esc([r.distance, SURFACE_NAME[r.surface] || r.surface, r.conditions].filter(Boolean).join(' · '))}</span>
+        ${order ? `<span class="pill ${order.cls}" title="Do the products rank this field in the same order? 1 = identical order">Order agreement ${order.text} · ${order.word}</span>` : ''}
+        <span class="pill" title="Horses whose running style is E (early)">Early speed: ${r.earlyCount} E</span></div>`;
+      const th = '<tr><th>PP</th><th>Horse</th><th>ML</th><th>Style</th><th class="num">Rating</th><th class="num">Last</th><th class="num">Best</th><th class="num">Trend</th>' +
+        srcs.map((s) => `<th class="num" title="Most recent ${esc(s.name)} figure">${esc(s.short)}</th>`).join('') +
+        '<th class="num" title="0 to 1: how closely the products agree on this horse\'s recent runs">Agree</th><th class="num">Starts</th></tr>';
+      const rows = r.horses.map((h) => {
+        const key = `${r.race}|${F.horseKey(h.horse)}`;
+        const open = ui.openCard[key];
+        const ag = agreeLabel(h.agreement);
+        const trendCls = h.trend > 1 ? 'up' : h.trend < -1 ? 'down' : '';
+        let html = `<tr class="horse" data-cardkey="${esc(key)}" tabindex="0"><td><span class="post">${esc(h.post || '–')}</span></td>` +
+          `<td><b>${open ? '▾' : '▸'} ${esc(h.horse)}</b></td><td>${esc(h.ml)}</td>` +
+          `<td>${h.style.style ? `<span class="style style-${h.style.style}" title="${esc(styleTitle(h.style))}">${h.style.style}</span>` : '<span class="hint" title="No running-line data yet">–</span>'}</td>` +
+          `<td class="num"><b>${fmt(h.rating)}</b>${h.rank ? ` <span class="hint">#${h.rank}</span>` : ''}</td><td class="num">${fmt(h.last)}</td><td class="num">${fmt(h.best)}</td>` +
+          `<td class="num ${trendCls}">${h.trend == null ? '–' : (h.trend > 0 ? '+' : '') + fmt(h.trend)}</td>` +
+          srcs.map((s) => `<td class="num">${esc(h.latest[s.id] ?? '')}</td>`).join('') +
+          `<td class="num ${ag.cls}" title="${h.agreementRuns ? `${h.agreementRuns} runs with 2+ products` : 'Only one product so far'}">${ag.text}</td><td class="num">${h.starts}</td></tr>`;
+        if (open) {
+          html += `<tr class="detail"><td></td><td colspan="${8 + srcs.length + 2}">` + (h.races.length ? `<table><tr><th>Date</th><th>Trk</th><th>Dist</th><th>1st call</th>` +
+            srcs.map((s) => `<th class="num">${esc(s.short)}</th>`).join('') + '<th class="num">Unified</th><th class="num">Agree</th></tr>' +
+            h.races.map((x) => {
+              const byId = Object.fromEntries(x.parts.map((p) => [p.id, p]));
+              const a = x.n > 1 ? agreeLabel(C.agreementFromSpread(x.gap)) : agreeLabel(null);
+              const st = C.raceStyle(x.race);
+              return `<tr><td>${esc(x.race.date)}</td><td>${esc(x.race.track)}</td><td>${esc(x.race.distance)}</td>` +
+                `<td>${x.race.call1 != null ? `${esc(x.race.call1)}${x.race.call1Lengths != null ? ` (${esc(x.race.call1Lengths)}L)` : ''} ${st ? `<span class="style style-${st}">${st}</span>` : ''}` : ''}</td>` +
+                srcs.map((s) => { const p = byId[s.id]; return `<td class="num">${p ? `${esc(x.race[s.id])} <span class="hint">(${fmt(p.converted)})</span>` : ''}</td>`; }).join('') +
+                `<td class="num"><b>${fmt(x.unified)}</b></td><td class="num ${a.cls}">${a.text}</td></tr>`;
+            }).join('') + '</table>' : '<p class="hint">No past figures saved for this horse yet.</p>') + '</td></tr>';
+        }
+        return html;
+      }).join('');
+      return `<section class="race">${head}<div class="scroll"><table>${th}${rows}</table></div></section>`;
+    }).join('');
+  }
+
+  $('#card-select').addEventListener('change', (e) => {
+    ui.card = e.target.value;
+    prefs.card = ui.card;
+    writeJSON(PREFS_KEY, prefs);
+    renderCard();
+  });
+  function toggleCardHorse(e) {
+    const tr = e.target.closest('tr.horse');
+    if (!tr || (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ')) return;
+    e.preventDefault();
+    ui.openCard[tr.dataset.cardkey] = !ui.openCard[tr.dataset.cardkey];
+    renderCard();
+  }
+  $('#card-out').addEventListener('click', toggleCardHorse);
+  $('#card-out').addEventListener('keydown', toggleCardHorse);
+  confirmButton($('#card-delete'), () => (ui.card ? 'Delete this card? Past figures stay saved.' : null), () => {
+    delete state.cards[ui.card];
+    ui.card = null;
+    persist();
+  });
+
+  /* ---------- PDF report (built in the page, no Claude usage) ---------- */
+  const JSPDF = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+  const AUTOTABLE = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js';
+  let pdfLibReady;
+  const pdfText = (v) => String(v == null ? '' : v).replace(/[–—]/g, '-').replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/[^\x20-\x7E]/g, '');
+
+  async function downloadPdf() {
+    const rep = currentReport();
+    if (!rep) return;
+    const btn = $('#card-pdf');
+    btn.disabled = true;
+    btn.textContent = 'Building PDF…';
+    try {
+      pdfLibReady = pdfLibReady || loadScript(JSPDF).then(() => loadScript(AUTOTABLE));
+      await pdfLibReady;
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'letter' });
+      const srcs = enabled();
+      const detail = $('#pdf-detail').checked;
+      const W = doc.internal.pageSize.getWidth();
+      const M = 36;
+      const green = [31, 107, 74];
+      const title = `${rep.track || ''} ${rep.date} - Horsey unified figures`;
+
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(16);
+      doc.text(pdfText(title), M, M + 6);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(90);
+      const legend = [
+        'Rating: unified figure on a Beyer-equivalent scale (higher is better), recency weighted over the last races. #n = rank in the field.',
+        'Agree: 0 to 1, how closely the figure products matched on the same runs (1 = identical, 0.5 = about 6 points apart). Order agreement: whether the products rank the field in the same order.',
+        'Style from first-call position: E early (on the lead or within 1 length), P presser (within 5), C closer. Product columns show each horse\'s most recent figure.',
+        `Made ${new Date().toISOString().slice(0, 10)} from ${state.races.length} saved races. Figures are estimates.`,
+      ];
+      doc.text(legend.map(pdfText), M, M + 22);
+      let y = M + 22 + legend.length * 10 + 8;
+      doc.setTextColor(0);
+
+      for (const r of rep.races) {
+        if (y > doc.internal.pageSize.getHeight() - 120) { doc.addPage(); y = M; }
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
+        doc.text(pdfText(`Race ${r.race}`), M, y + 10);
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+        const meta = [r.distance, SURFACE_NAME[r.surface] || r.surface, r.conditions,
+          r.order ? `Order agreement ${r.order.score.toFixed(2)} (${agreeLabel(r.order.score).word})` : null,
+          `Early speed: ${r.earlyCount} E`].filter(Boolean).join('   |   ');
+        doc.text(pdfText(meta), M + 58, y + 10);
+        const head = [['PP', 'Horse', 'ML', 'Style', 'Rating', 'Rank', 'Last', 'Best', 'Trend', ...srcs.map((s) => s.short), 'Agree', 'Starts']];
+        const body = r.horses.map((h) => [
+          h.post || '-', h.horse, h.ml || '', h.style.style || '-', fmt(h.rating), h.rank || '-', fmt(h.last), fmt(h.best),
+          h.trend == null ? '-' : (h.trend > 0 ? '+' : '') + fmt(h.trend),
+          ...srcs.map((s) => h.latest[s.id] ?? ''), h.agreement == null ? '-' : h.agreement.toFixed(2), String(h.starts),
+        ].map(pdfText));
+        doc.autoTable({
+          head, body, startY: y + 16, margin: { left: M, right: M }, theme: 'grid',
+          styles: { fontSize: 8.5, cellPadding: 3, lineColor: [210, 210, 205], lineWidth: 0.5 },
+          headStyles: { fillColor: green, textColor: 255, fontStyle: 'bold' },
+          columnStyles: { 0: { cellWidth: 26, fontStyle: 'bold' }, 1: { cellWidth: 130, fontStyle: 'bold' } },
+          didParseCell: (d) => {
+            if (d.section === 'body' && d.column.index > 3 && d.column.index !== 1) d.cell.styles.halign = 'right';
+            if (d.section === 'body' && d.column.index === head[0].length - 2) {
+              const v = parseFloat(d.cell.raw);
+              if (v >= 0.8) d.cell.styles.textColor = green; else if (v < 0.5) d.cell.styles.textColor = [179, 38, 30];
+            }
+          },
+        });
+        y = doc.lastAutoTable.finalY + 10;
+
+        if (detail) {
+          const dhead = [['Horse / date', 'Trk', 'Dist', '1st call', ...srcs.map((s) => s.short), 'Unified', 'Agree']];
+          const dbody = [];
+          for (const h of r.horses) {
+            dbody.push([{ content: pdfText(`${h.post || '-'}  ${h.horse}`), colSpan: dhead[0].length, styles: { fontStyle: 'bold', fillColor: [238, 243, 239] } }]);
+            const list = h.races.slice(0, 6);
+            if (!list.length) dbody.push([{ content: 'No past figures saved', colSpan: dhead[0].length, styles: { textColor: 120 } }]);
+            for (const x of list) {
+              dbody.push([
+                x.race.date || '', x.race.track || '', x.race.distance || '',
+                x.race.call1 != null ? `${x.race.call1}${x.race.call1Lengths != null ? ` (${x.race.call1Lengths}L)` : ''} ${C.raceStyle(x.race) || ''}` : '',
+                ...srcs.map((s) => x.race[s.id] ?? ''), fmt(x.unified), x.n > 1 ? C.agreementFromSpread(x.gap).toFixed(2) : '-',
+              ].map(pdfText));
+            }
+          }
+          if (y > doc.internal.pageSize.getHeight() - 80) { doc.addPage(); y = M; }
+          doc.autoTable({
+            head: dhead, body: dbody, startY: y, margin: { left: M + 26, right: M }, theme: 'plain',
+            styles: { fontSize: 7.5, cellPadding: 2 }, headStyles: { textColor: 90, fontStyle: 'bold' },
+          });
+          y = doc.lastAutoTable.finalY + 18;
+        } else {
+          y += 8;
+        }
+      }
+      const pages = doc.getNumberOfPages();
+      for (let i = 1; i <= pages; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8); doc.setTextColor(120);
+        doc.text(pdfText(`${rep.track || ''} ${rep.date}  ·  page ${i} of ${pages}`), W - M, doc.internal.pageSize.getHeight() - 16, { align: 'right' });
+      }
+      const blob = doc.output('blob');
+      await offerFile(`horsey-${rep.track || 'card'}-${rep.date}.pdf`.replace(/[^\w.-]+/g, '-'), blob, 'application/pdf');
+    } catch (e) {
+      flash(`The PDF couldn't be built (${(e && e.message) || 'unknown error'}). Check your connection and try again.`);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Download PDF report';
+    }
+  }
+  $('#card-pdf').addEventListener('click', downloadPdf);
+
   /* ---------- backup ---------- */
   $('#backup').addEventListener('click', () => {
-    const data = { app: 'horsey', version: 1, savedAt: new Date().toISOString(), races: state.races, sources: state.sources, fitReport: state.fitReport };
+    const data = { app: 'horsey', version: 1, savedAt: new Date().toISOString(), races: state.races, cards: state.cards, sources: state.sources, fitReport: state.fitReport };
     offerFile(`horsey-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(data, null, 1), 'application/json');
   });
   $('#restore-file').addEventListener('change', async (e) => {
@@ -744,6 +1023,7 @@
       state.races = r.races;
       if (Array.isArray(data.sources)) state.sources = withNewSources(data.sources);
       if (data.fitReport !== undefined) state.fitReport = data.fitReport;
+      if (data.cards && typeof data.cards === 'object') state.cards = Object.assign({}, state.cards, data.cards);
       flash(`Restored ${f.name}: ${r.added} new, ${r.updated} updated, ${r.unchanged} already saved. Calibration restored.`);
       persist();
     } catch (err) {
@@ -857,6 +1137,7 @@
 
   function renderAll() {
     const active = document.querySelector('.tab.active').id;
+    if (active === 'tab-card') renderCard();
     if (active === 'tab-convert') renderConvert();
     if (active === 'tab-figures') renderFigures();
     if (active === 'tab-rankings') renderRankings();

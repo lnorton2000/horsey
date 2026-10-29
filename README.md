@@ -35,6 +35,29 @@ To rebuild the single-file hosted version after changing the code:
 npm run build:artifact
 ```
 
+## Race card
+
+The **Race card** tab lists today's horses by race and post position, like a traditional PP. Claude picks up each horse's race number, post (program number), morning line and any printed run style from the PP headers when it reads your files. You can also import a CSV with `track, date, race, post, horse` columns (plus `ml` if you have it).
+
+For each horse:
+
+- **Rating:** the unified figure (Beyer scale), plus its rank in the field, and last, best and trend figures.
+- **Product columns:** the horse's most recent figure from each product.
+- **Agree (0 to 1, where 1 = total agreement):** how closely the products' figures matched on the same runs. For each run, the score is `1 / (1 + (gap / 6)²)`, where *gap* is the average difference, in Beyer points, between each pair of products. That works out to 1.00 for identical figures, 0.80 at 3 points apart, 0.50 at 6 and 0.20 at 12. The horse's score is the average over its last 6 runs that have two or more products. Green means the products agree (0.8 or higher); red means they conflict (below 0.5).
+- **Style:** worked out from the first-call position in the last 6 running lines.
+  - **E** (early): on the lead or within 1 length
+  - **P** (presser): within 5 lengths
+  - **C** (closer): further back
+
+  When there are no running lines, a style printed in the PPs is used instead (Brisnet's E and E/P count as E, and S counts as C).
+
+For each race:
+
+- **Order agreement:** whether the products rank the field in the same order. It is Kendall's tau between each pair of products, rescaled to 0 to 1.
+- **Early speed:** how many E types are in the field.
+
+**Download PDF report** builds a landscape PDF of the whole card in the page itself. It can include each horse's last 6 races. Viewing cards and making PDFs never uses Claude; only reading new files does.
+
 ## Dropping in raw PPs and sheets
 
 On the hosted page you don't need to format anything. Drop files on the **Figures** tab:
@@ -124,6 +147,7 @@ scripts/            build-artifact.js bundles everything into one page for hosti
 style.css           styles (light and dark)
 lib/figures.js      conversion, blending, calibration, ratings, CSV, merging; no dependencies
 lib/extract.js      PDF text layout, prompt and answer checking for raw-file import
+lib/card.js         race cards: entries, agreement scores, running style
 lib/sample-data.js  fictional demo horses (not real figures)
 test/               node:test unit tests
 ```
