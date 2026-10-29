@@ -288,7 +288,7 @@
   }
   $('#migrate-yes').addEventListener('click', () => {
     const saved = readJSON(LOCAL_KEY) || {};
-    const r = F.mergeRaces(state.races, saved.races || []);
+    const r = F.mergeRaces(state.races, saved.races || [], mergeOpts());
     state.races = r.races;
     try { localStorage.removeItem(LOCAL_KEY); } catch (e) { /* ignore */ }
     $('#migrate').hidden = true;
@@ -297,22 +297,51 @@
   });
   $('#migrate-no').addEventListener('click', () => { $('#migrate').hidden = true; });
 
-  /** Rows saved before undated runs were linked across products. */
+  /** Options for combining rows: calibrated figures break ties, names on race cards win. */
+  function mergeOpts() {
+    const preferNames = [];
+    for (const c of Object.values(state.cards)) for (const r of Object.values(c.races || {})) for (const e of r.entries) preferNames.push(e.horse);
+    return { today: new Date().toISOString().slice(0, 10), sources: src(), preferNames };
+  }
+
+  function describeCleanup(c) {
+    const bits = [];
+    if (c.repeats) bits.push(`${c.repeats} repeated runs (a second read that missed the date)`);
+    if (c.linked) bits.push(`${c.linked} runs saved separately per product`);
+    if (c.aliases.length) bits.push(`${c.aliases.length} horse${c.aliases.length === 1 ? '' : 's'} saved under two names (${c.aliases.map(([a, b]) => `${a} = ${b}`).join(', ')})`);
+    if (c.fixedDates) bits.push(`${c.fixedDates} date${c.fixedDates === 1 ? '' : 's'} with the wrong year`);
+    return bits.join('; ');
+  }
+
+  /** Saved rows that don't combine correctly yet (saved before the current matching rules). */
   let relinkDismissed = false;
+  let relinkMemo = { rev: -1, result: null };
+  function pendingCleanup() {
+    if (relinkMemo.rev !== dataRev) relinkMemo = { rev: dataRev, result: F.cleanupRaces(state.races, mergeOpts()) };
+    return relinkMemo.result;
+  }
   function offerRelink() {
     if (relinkDismissed || !canEdit() || store.active + store.queue.length) return;
-    const n = F.linkRaces(state.races).linked;
-    $('#relink').hidden = !n;
-    if (n) $('#relink-text').textContent = `${n} races were saved twice: once per product, because one copy had no date. Join them so their figures are compared?`;
+    const c = pendingCleanup();
+    $('#relink').hidden = !c.total;
+    if (c.total) $('#relink-text').textContent = `Your saved races can be combined better: ${describeCleanup(c)}. Clean them up?`;
   }
   $('#relink-yes').addEventListener('click', () => {
-    const r = F.linkRaces(state.races);
-    state.races = r.races;
-    $('#relink').hidden = true;
-    flash(`Joined ${r.linked} races.`);
+    const c = pendingCleanup();
+    const before = state.races.length;
+    state.races = c.races;
+    relinkDismissed = true;
+    $('#relink-text').textContent = `Cleaned up: ${describeCleanup(c)}. ${before} rows are now ${c.races.length}.`;
+    $('#relink-yes').hidden = true;
+    $('#relink-no').textContent = 'Close';
     persist();
   });
-  $('#relink-no').addEventListener('click', () => { relinkDismissed = true; $('#relink').hidden = true; });
+  $('#relink-no').addEventListener('click', () => {
+    relinkDismissed = true;
+    $('#relink').hidden = true;
+    $('#relink-yes').hidden = false;
+    $('#relink-no').textContent = 'Not now';
+  });
 
   function boot() {
     initSample();
@@ -520,7 +549,7 @@
       if (!batch) { flash(note); persist(); }
       return note;
     }
-    const r = F.mergeRaces(state.races, races);
+    const r = F.mergeRaces(state.races, races, mergeOpts());
     state.races = r.races;
     const parts = [`${label}: ${r.added} new race${r.added === 1 ? '' : 's'}`];
     if (r.updated) parts.push(`${r.updated} updated with new figures`);
@@ -691,7 +720,7 @@
         if (job.blobs) opts.images = job.blobs;
         try {
           const answer = await raw.sample.json(prompt, opts);
-          const res = X.normalizeExtraction(answer, product === 'auto' ? null : product);
+          const res = X.normalizeExtraction(answer, product === 'auto' ? null : product, today);
           for (const r of res.rows) raw.rows.push(Object.assign(r, { _id: ++raw.seq, _src: job.source, _checked: true }));
           raw.entries.push(...res.entries);
           found += res.rows.length;
@@ -795,7 +824,7 @@
       for (const [k, v] of Object.entries(r)) if (!k.startsWith('_') && k !== 'dateFrom' && !(k === 'month' && r.date)) o[k] = v;
       return o;
     });
-    const res = F.mergeRaces(state.races, picked);
+    const res = F.mergeRaces(state.races, picked, mergeOpts());
     state.races = res.races;
     raw.rows = raw.rows.filter((r) => !r._checked);
     let entryNote = '';
@@ -1065,7 +1094,7 @@
     try {
       const data = JSON.parse(await f.text());
       if (!data || !Array.isArray(data.races)) throw new Error('not a backup');
-      const r = F.mergeRaces(state.races, data.races);
+      const r = F.mergeRaces(state.races, data.races, mergeOpts());
       state.races = r.races;
       if (Array.isArray(data.sources)) state.sources = withNewSources(data.sources);
       if (data.fitReport !== undefined) state.fitReport = data.fitReport;

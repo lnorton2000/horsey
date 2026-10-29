@@ -189,3 +189,53 @@ test('linkRaces joins an undated run to the one matching row only', () => {
   const m = F.mergeRaces([races[0]], [races[1]]);
   assert.deepEqual([m.races.length, m.added, m.updated, m.linked], [1, 0, 1, 1]);
 });
+
+test('cleanupRaces: repeats, near-miss details, two spellings, wrong years', () => {
+  const races = [
+    // dated run with both products, plus an undated repeat of its ThoroManager figure
+    { horse: 'Big Apple Patrick', date: '2025-12-20', track: 'RP', distance: '8f', race: '12', finish: '6', call1: '8', thoromanager: '74' },
+    { horse: 'Big Apple Patrick', track: 'RP', distance: '8f', finish: '6', call1: '8', thoromanager: '74' },
+    { horse: 'Big Apple Patrick', track: 'RP', distance: '1m', race: '12', field: '11', finish: '6', call1: '8', beyer: '65' },
+    // one side misread the distance; race, finish, first call and field all agree
+    { horse: 'Coach Pope', date: '2026-10-03', track: 'KEE', distance: '8.5f', race: '9', field: '6', finish: '2', call1: '2', thoromanager: '94' },
+    { horse: 'Coach Pope', track: 'KEE', distance: '1m', race: '9', field: '6', finish: '2', call1: '2', beyer: '83' },
+    // products put the first call a position apart
+    { horse: 'Burnham Square', date: '2026-09-05', track: 'KD', distance: '12f', finish: '7', call1: '6', beyer: '93' },
+    { horse: 'Burnham Square', track: 'KD', distance: '12f', finish: '7', call1: '7', trackmaster: '96' },
+    // one horse, two spellings, same dates
+    { horse: 'Disaster', date: '2026-10-01', track: 'BEL', finish: '1', beyer: '103' },
+    { horse: 'Disaster', date: '2026-08-29', track: 'SAR', finish: '6', beyer: '74' },
+    { horse: 'R Disaster', date: '2026-10-01', track: 'BEL', finish: '1', equibase: '111' },
+    { horse: 'R Disaster', date: '2026-08-29', track: 'SAR', finish: '6', equibase: '81' },
+    // a year misread into the future
+    { horse: 'Induction', date: '2026-12-26', track: 'CD', beyer: '73' },
+  ];
+  const c = F.cleanupRaces(races, { today: '2026-10-29', preferNames: ['R Disaster'] });
+  assert.equal(c.repeats, 1);
+  assert.equal(c.linked, 3);
+  assert.deepEqual(c.aliases, [['Disaster', 'R Disaster']]);
+  assert.equal(c.fixedDates, 1);
+  const find = (h, d) => c.races.filter((r) => F.horseKey(r.horse) === F.horseKey(h) && (!d || r.date === d));
+  assert.equal(find('Big Apple Patrick').length, 1);
+  assert.equal(find('Big Apple Patrick')[0].beyer, '65');
+  assert.equal(find('Coach Pope')[0].beyer, '83');
+  assert.equal(find('Burnham Square')[0].trackmaster, '96');
+  assert.equal(find('Disaster').length, 0);
+  assert.deepEqual(find('R Disaster', '2026-10-01').map((r) => [r.beyer, r.equibase]), [['103', '111']]);
+  assert.equal(find('Induction')[0].date, '2025-12-26');
+  assert.equal(c.races.length, 6);
+  // Nothing left to do the second time.
+  assert.equal(F.cleanupRaces(c.races, { today: '2026-10-29' }).total, 0);
+});
+
+test('cleanupRaces leaves genuinely different runs apart', () => {
+  const races = [
+    { horse: 'Floodlites', date: '2025-08-30', track: 'KD', distance: '6f', race: '4', field: '12', finish: '12', call1: '4', equibase: '73' },
+    { horse: 'Floodlites', track: 'KD', distance: '6f', race: '5', field: '12', finish: '1', call1: '4', beyer: '72' },
+    { horse: 'Ways and Means', date: '2026-06-05', track: 'SAR', distance: '7f', finish: '1', call1: '2', beyer: '107' },
+    { horse: 'Ways and Means', date: '2025-06-06', track: 'SAR', distance: '7f', finish: '1', call1: '2', beyer: '108' },
+    { horse: 'Ways and Means', track: 'SAR', distance: '7f', finish: '1', call1: '2', trackmaster: '107' },
+  ];
+  const c = F.cleanupRaces(races, { today: '2026-10-29', sources: F.cloneSources().map((s) => Object.assign(s, { enabled: true })) });
+  assert.equal(c.total, 0, 'different race and finish; two equally close candidates');
+});

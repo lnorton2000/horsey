@@ -115,9 +115,16 @@ The fit uses reduced-major-axis regression rather than ordinary least squares. B
 
 A product needs at least 5 paired races to be fitted. In practice, a few dozen races across sprints and routes gives stable numbers.
 
-## Linking runs without a date
+## Combining runs from different products
 
-A run read without a date can't be matched by horse + date. Horsey joins it to another row for the same horse when exactly one row fits: the same track, no product in common, no conflicting month, and at least two of distance, finish position, first-call position and race number agreeing, with none of them contradicting. This happens on every import. For data saved before this existed, a banner offers to join the matches in one click. When two rows fit equally well, nothing is joined.
+Rows for the same horse on the same date are one race. Every import also tidies up what that rule alone can't, in this order:
+
+1. **Wrong years.** A date read with the wrong year lands in the future (2026-12-26 when today is 2026-10-29); it is moved back a year.
+2. **One horse under two names.** Two similar names (one contains the other, or they're 2 letters apart) whose runs fall on the same dates at least twice, from different products ("Disaster" and "R Disaster"), become one horse. The name on a race card wins; otherwise, the name with more rows.
+3. **Repeats.** An undated row that repeats a saved run (same product, same figure, nothing contradicting) is a second read that missed the date. It is dropped, and any details it adds are kept.
+4. **Undated runs.** An undated run joins the row that is the same run from another product: same track (BAQ and AQU count as one), and at least two of distance, finish, first-call position, race number and field size agreeing with none contradicting. If one detail contradicts, at least four others must agree, because one side sometimes misreads a distance. Products record details slightly differently, so first-call positions within 2, field sizes within 1 and distances within 0.15 furlongs don't count as contradictions. When several rows fit, the one whose calibrated figure is clearly closest wins (within 3 points, with the next at least 5 points further). Otherwise nothing is joined.
+
+Data saved before these rules existed gets a **Clean up** banner that does all of this in one click.
 
 ## Data format
 
