@@ -152,3 +152,12 @@ test('mergeRaces combines separate product uploads and ignores re-uploads', () =
   r = F.mergeRaces([], [{ horse: 'X', beyer: '80' }, { horse: 'X', beyer: '80' }, { horse: 'X', beyer: '81' }]);
   assert.deepEqual([r.added, r.unchanged], [2, 1]);
 });
+
+test('undated races with a month still sort by recency', () => {
+  const r = F.rateHorses([
+    { horse: 'A', month: '2026-03', beyer: 80 },
+    { horse: 'A', month: '2026-08', ragozin: '9' },
+    { horse: 'A', date: '2026-05-10', beyer: 90 },
+  ], F.cloneSources());
+  assert.deepEqual(r[0].races.map((x) => x.race.month || x.race.date), ['2026-08', '2026-05-10', '2026-03']);
+});

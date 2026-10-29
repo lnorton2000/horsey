@@ -388,7 +388,7 @@
         let bad = false;
         if (cls === 'fig' && r[k] != null && r[k] !== '') bad = F.parseFigure(r[k]) == null;
         if (k === 'distance' && r[k]) bad = F.parseDistance(r[k]) == null;
-        return `<td><input data-row="${i}" data-key="${k}" value="${esc(r[k])}" aria-label="${esc(k)}" class="${cls === 'wide' ? 'wide' : ''}${bad ? ' bad' : ''}"${ro ? ' readonly' : ''}></td>`;
+        return `<td><input data-row="${i}" data-key="${k}" value="${esc(r[k])}" aria-label="${esc(k)}"${k === 'date' && !r.date && r.month ? ` placeholder="${esc(r.month)}"` : ''} class="${cls === 'wide' ? 'wide' : ''}${bad ? ' bad' : ''}"${ro ? ' readonly' : ''}></td>`;
       }).join('') +
         `<td class="num"><b>${c ? fmt(c.unified) : '–'}</b></td><td class="num">${c && c.n > 1 ? fmt(c.spread) : ''}</td>` +
         `<td>${ro ? '' : `<button data-del="${i}" title="Delete row" aria-label="Delete row">&times;</button>`}</td></tr>`;
@@ -645,7 +645,7 @@
         try {
           const answer = await raw.sample.json(prompt, opts);
           const res = X.normalizeExtraction(answer, product === 'auto' ? null : product);
-          for (const r of res.rows) raw.rows.push(Object.assign(r, { _id: ++raw.seq, _src: job.source, _checked: !!r.date }));
+          for (const r of res.rows) raw.rows.push(Object.assign(r, { _id: ++raw.seq, _src: job.source, _checked: true }));
           raw.entries.push(...res.entries);
           found += res.rows.length;
           renderRaw();
@@ -667,7 +667,6 @@
       }
       raw.running = false;
       const filled = X.resolveMonthOnlyDates(raw.rows.filter((r) => !r.date), state.races.concat(raw.rows.filter((r) => r.date)));
-      for (const r of raw.rows) if (r.dateFrom === 'matched' && !r._touched) r._checked = true;
       if (jobs.length) {
         const bits = [`Read ${done} page${done === 1 ? '' : 's'}: ${found} races found.`];
         if (filled) bits.push(`${filled} sheet dates matched to known races.`);
@@ -685,7 +684,7 @@
   }
 
   function rawStatus(r) {
-    if (!r.date) return '<span class="pill warn">needs a date</span>';
+    if (!r.date) return `<span class="pill warn">no exact date${r.month ? ` (${esc(r.month)})` : ''}</span>`;
     const k = F.raceKey(r);
     const saved = state.races.some((s) => F.raceKey(s) === k);
     const tag = r.dateFrom === 'matched' ? ' (day matched)' : '';
@@ -721,7 +720,7 @@
     if (!checked && raw.entries.length) $('#raw-save').textContent = 'Save entries';
     $('#raw-summary').textContent = `${raw.rows.length} past races read.` +
       (raw.entries.length ? ` Also found ${raw.entries.length} entries (post positions) on ${cardsSeen.size} race card${cardsSeen.size === 1 ? '' : 's'}; they're saved with the races.` : '') +
-      (undated ? ` ${undated} have no date yet: type one in (YYYY-MM-DD) and check the box, or leave them unchecked.` : '') +
+      (undated ? ` ${undated} have no exact date. They'll still be saved and rated, but they can't combine with the same race from another product; type a date (YYYY-MM-DD) if you know it.` : '') +
       ' Fix anything that looks wrong before saving.';
   }
 
@@ -735,18 +734,18 @@
       const v = t.value.trim();
       if (!v) delete r[t.dataset.key];
       else r[t.dataset.key] = t.dataset.key === 'date' ? F.normalizeDate(v) : v;
-      if (t.dataset.key === 'date') { delete r.dateFrom; r._checked = !!r.date; }
+      if (t.dataset.key === 'date') delete r.dateFrom;
     }
     renderRaw();
   });
   $('#raw-all').addEventListener('change', (e) => {
-    for (const r of raw.rows) r._checked = e.target.checked && !!r.date;
+    for (const r of raw.rows) r._checked = e.target.checked;
     renderRaw();
   });
   $('#raw-save').addEventListener('click', () => {
     const picked = raw.rows.filter((r) => r._checked).map((r) => {
       const o = {};
-      for (const [k, v] of Object.entries(r)) if (!k.startsWith('_') && k !== 'month' && k !== 'dateFrom') o[k] = v;
+      for (const [k, v] of Object.entries(r)) if (!k.startsWith('_') && k !== 'dateFrom' && !(k === 'month' && r.date)) o[k] = v;
       return o;
     });
     const res = F.mergeRaces(state.races, picked);
