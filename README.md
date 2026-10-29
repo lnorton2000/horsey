@@ -128,6 +128,15 @@ Rows for the same horse on the same date are one race. Every import also tidies 
 4. **Repeats.** An undated row that repeats a saved run (same product, same figure, nothing contradicting) is a second read that missed the date. It is dropped, and any details it adds are kept.
 5. **Undated runs.** An undated run joins the row that is the same run from another product: same track (BAQ and AQU count as one), and at least two of distance, finish, first-call position, race number and field size agreeing with none contradicting. If one detail contradicts, at least four others must agree, because one side sometimes misreads a distance. Products record details slightly differently, so first-call positions within 2, field sizes within 1 and distances within 0.15 furlongs don't count as contradictions. When several rows fit, the one whose calibrated figure is clearly closest wins (within 3 points, with the next at least 5 points further). Otherwise nothing is joined.
 
+Sheets add a few rules of their own:
+
+- **Sire and dam pages.** For first-time starters, sheets include pages for the sire, the dam ("Dam-Damsire") and siblings. The reader skips them. In review, any sheet row for a horse on none of your race cards is left unchecked.
+- **Entries.** Post positions come from PPs only. The codes beside sheet figures (`512T`, `1T`) are class/track/day codes, not posts.
+- **Country suffixes.** `-IR`, `-GB` and `-JP` (and `(IRE)` in PPs) are ignored when matching names, so "FINAL OBJECTIVE-IR" is "Final Objective". Each horse shows the spelling on its race card.
+- **Today lines.** A sheet row dated on or after the horse's race-card date is the sheet's today line, not a race, and is dropped.
+- **Misread days.** A sheet figure joins the DRF/ThoroManager row for the same race when they are within 10 days (4 if the tracks can't be compared), the tracks match (`KE`/`KEE`, `SR`/`SAR`), the surfaces agree, the converted figures are within 12 points, and the match is one-to-one. The PP date is kept.
+- **Invalid dates.** Dates that don't exist (April 40) are rejected.
+
 Data saved before these rules existed gets a **Clean up** banner that does all of this in one click.
 
 ## Data format

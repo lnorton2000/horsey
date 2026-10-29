@@ -301,14 +301,26 @@
   /** Options for combining rows: calibrated figures break ties, names on race cards win. */
   function mergeOpts() {
     const preferNames = [];
-    for (const c of Object.values(state.cards)) for (const r of Object.values(c.races || {})) for (const e of r.entries) preferNames.push(e.horse);
-    return { today: new Date().toISOString().slice(0, 10), sources: src(), preferNames, remap: F.productRemap(state.sources) };
+    const entryDates = {};
+    for (const c of Object.values(state.cards)) {
+      for (const r of Object.values(c.races || {})) {
+        for (const e of r.entries) {
+          preferNames.push(e.horse);
+          const k = F.horseKey(e.horse);
+          if (c.date && (!entryDates[k] || c.date < entryDates[k])) entryDates[k] = c.date;
+        }
+      }
+    }
+    return { today: new Date().toISOString().slice(0, 10), sources: src(), preferNames, entryDates, remap: F.productRemap(state.sources) };
   }
 
   function describeCleanup(c) {
     const bits = [];
     const target = Object.values(F.productRemap(state.sources))[0];
     if (c.relabeled) bits.push(`${c.relabeled} figures filed under a product you don't use, moved to ${(state.sources.find((s) => s.id === target) || { name: target }).name.replace(/ PPs$/, '')}`);
+    if (c.todayLines) bits.push(`${c.todayLines} sheet "today" line${c.todayLines === 1 ? '' : 's'} read as a race`);
+    if (c.names) bits.push(`${c.names} horse${c.names === 1 ? '' : 's'} spelled more than one way`);
+    if (c.sheetJoined) bits.push(`${c.sheetJoined} sheet figure${c.sheetJoined === 1 ? '' : 's'} a few days off the DRF/ThoroManager date for the same race`);
     if (c.repeats) bits.push(`${c.repeats} repeated runs (a second read that missed the date)`);
     if (c.linked) bits.push(`${c.linked} runs saved separately per product`);
     if (c.aliases.length) bits.push(`${c.aliases.length} horse${c.aliases.length === 1 ? '' : 's'} saved under two names (${c.aliases.map(([a, b]) => `${a} = ${b}`).join(', ')})`);
@@ -744,7 +756,7 @@
         try {
           const answer = await raw.sample.json(prompt, opts);
           const res = X.normalizeExtraction(answer, product === 'auto' ? null : product, today, F.productRemap(state.sources));
-          for (const r of res.rows) raw.rows.push(Object.assign(r, { _id: ++raw.seq, _src: job.source, _checked: true }));
+          for (const r of res.rows) raw.rows.push(Object.assign(r, { _id: ++raw.seq, _src: job.source, _checked: !offCardSheet(r) }));
           raw.entries.push(...res.entries);
           found += res.rows.length;
           renderRaw();
@@ -796,7 +808,16 @@
     return mine.unified - known.reduce((a, c) => a + c.unified, 0) / known.length;
   }
 
+  /** A sheet row for a horse on none of the saved race cards: usually a sire or dam page. */
+  function offCardSheet(r) {
+    if (!(r.ragozin || r.thorograph)) return false;
+    const keys = new Set();
+    for (const c of Object.values(state.cards)) for (const rc of Object.values(c.races || {})) for (const e of rc.entries) keys.add(F.horseKey(e.horse));
+    return keys.size > 0 && !keys.has(F.horseKey(r.horse));
+  }
+
   function rawStatus(r) {
+    if (offCardSheet(r)) return '<span class="pill warn" title="This horse is on none of your race cards. Sheets for first-time starters include the sire and dam; those are left unchecked.">not on a race card (sire/dam?)</span>';
     if (!r.date) return `<span class="pill warn">no exact date${r.month ? ` (${esc(r.month)})` : ''}</span>`;
     const k = F.raceKey(r);
     const saved = state.races.filter((s) => F.raceKey(s) === k);

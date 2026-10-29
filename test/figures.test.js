@@ -251,3 +251,42 @@ test('parseFigure reads every Ragozin legend symbol', () => {
   assert.equal(F.sheetSurface('◇11'), 'S');
   assert.equal(F.sheetSurface('12-'), null);
 });
+
+test('sheet cleanup: country suffixes, impossible dates, today lines, misread days', () => {
+  assert.equal(F.horseKey('FINAL OBJECTIVE-IR'), F.horseKey('Final Objective'));
+  assert.equal(F.horseKey('Pikachu-GB'), 'PIKACHU');
+  assert.equal(F.horseKey('Copper Comet (IRE)'), 'COPPERCOMET');
+  assert.equal(F.horseKey('Sophia\'s Song-Bellamy Road'), 'SOPHIASSONGBELLAMYROAD', 'a dam-damsire is not a country code');
+  assert.equal(F.normalizeDate('2020-04-40'), '');
+  assert.equal(F.normalizeDate('2026-02-29'), '');
+  assert.equal(F.normalizeDate('2024-02-29'), '2024-02-29');
+  assert.equal(F.trackCompatible('KE', 'KEE'), true);
+  assert.equal(F.trackCompatible('SR', 'SAR'), true);
+  assert.equal(F.trackCompatible('BE', 'CD'), false);
+
+  const races = [
+    { horse: 'Adonius', date: '2026-10-04', track: 'KEE', beyer: '77', thoromanager: '83' },
+    { horse: 'ADONIUS-IR', date: '2026-10-03', sheetTrack: 'KE', ragozin: '15-' },           // day misread by one
+    { horse: 'Drake\'s Passage', date: '2026-09-01', track: 'CD', beyer: '80' },
+    { horse: 'Drake\'s Passage', date: '2026-10-30', sheetTrack: 'IN', ragozin: '13"' },     // the sheet's today line
+    { horse: 'El Cordobes', date: '2025-10-05', track: 'BEL', beyer: '90' },
+    { horse: 'El Cordobes', date: '2025-10-01', sheetTrack: 'SA', ragozin: '10-' },          // incompatible track: not joined
+    { horse: 'El Cordobes', date: '2024-06-01', sheetTrack: 'BE', ragozin: '12' },           // older race, nothing to join
+  ];
+  const c = F.cleanupRaces(races, { today: '2026-10-29', preferNames: ['Adonius', 'Drake\'s Passage'], entryDates: { DRAKESPASSAGE: '2026-10-30' } });
+  assert.equal(c.todayLines, 1);
+  assert.equal(c.sheetJoined, 1);
+  assert.equal(c.names, 1);
+  const ad = c.races.filter((r) => F.horseKey(r.horse) === 'ADONIUS');
+  assert.deepEqual(ad, [{ horse: 'Adonius', date: '2026-10-04', track: 'KEE', beyer: '77', thoromanager: '83', ragozin: '15-', sheetTrack: 'KE' }]);
+  assert.equal(c.races.filter((r) => F.horseKey(r.horse) === 'ELCORDOBES').length, 3);
+  assert.equal(c.races.length, 5);
+  // Ratings treat both spellings as one horse.
+  assert.equal(F.rateHorses([{ horse: 'A-IR', date: '2026-01-01', ragozin: '10' }, { horse: 'A', date: '2026-02-01', beyer: '90' }], F.cloneSources()).length, 1);
+});
+
+test('sheets never create race-card entries', () => {
+  const X = require('../lib/extract.js');
+  const r = X.normalizeExtraction({ product: 'ragozin', races: [], entries: [{ horse: 'Roja', track: 'KE', date: '2026-10-29', race: '5', post: '512T' }] });
+  assert.deepEqual(r.entries, []);
+});
