@@ -902,6 +902,15 @@
     return `${STYLE_NAME[st.style]}: E ${st.counts.E}, P ${st.counts.P}, C ${st.counts.C} over ${st.n} races`;
   }
 
+  /** Does ThoroManager's top PSR horse match the top unified rating? */
+  function psrPick(r) {
+    const top = r.horses.find((h) => h.psrRank === 1);
+    if (!top) return null;
+    const best = r.horses.find((h) => h.rank === 1);
+    if (best && best === top) return { same: true, text: `PSR and Rating agree: ${top.horse} on top` };
+    return { same: false, text: `PSR top: ${top.horse}${best ? `; Rating top: ${best.horse}` : ''}` };
+  }
+
   function currentReport() {
     const lastN = Math.max(1, +$('#opt-lastn').value || 6);
     const decay = Math.min(1, Math.max(0.3, +$('#opt-decay').value || 0.8));
@@ -928,13 +937,18 @@
       return;
     }
     const srcs = enabled();
+    const showPsr = rep.races.some((r) => r.horses.some((h) => h.psr != null));
     $('#card-out').innerHTML = rep.races.map((r) => {
       const order = r.order ? agreeLabel(r.order.score) : null;
+      const pick = psrPick(r);
       const head = `<div class="race-head"><h3>Race ${esc(r.race)}</h3>
         <span>${esc([r.distance, SURFACE_NAME[r.surface] || r.surface, r.conditions].filter(Boolean).join(' · '))}</span>
         ${order ? `<span class="pill ${order.cls}" title="Do the products rank this field in the same order? 1 = identical order">Order agreement ${order.text} · ${order.word}</span>` : ''}
-        <span class="pill" title="Horses whose running style is E (early)">Early speed: ${r.earlyCount} E</span></div>`;
-      const th = '<tr><th>PP</th><th>Horse</th><th>ML</th><th>Style</th><th class="num">Rating</th><th class="num">Last</th><th class="num">Best</th><th class="num">Trend</th>' +
+        <span class="pill" title="Horses whose running style is E (early)">Early speed: ${r.earlyCount} E</span>
+        ${pick ? `<span class="pill ${pick.same ? 'up' : ''}" title="ThoroManager's Projected Speed Rating vs the unified rating">${esc(pick.text)}</span>` : ''}</div>`;
+      const th = '<tr><th>PP</th><th>Horse</th><th>ML</th><th>Style</th><th class="num">Rating</th>' +
+        (showPsr ? '<th class="num" title="ThoroManager Projected Speed Rating for this race, with its rank in the field">PSR</th>' : '') +
+        '<th class="num">Last</th><th class="num">Best</th><th class="num">Trend</th>' +
         srcs.map((s) => `<th class="num" title="Most recent ${esc(s.name)} figure">${esc(s.short)}</th>`).join('') +
         '<th class="num" title="0 to 1: how closely the products agree on this horse\'s recent runs">Agree</th><th class="num">Starts</th></tr>';
       const rows = r.horses.map((h) => {
@@ -945,12 +959,14 @@
         let html = `<tr class="horse" data-cardkey="${esc(key)}" tabindex="0"><td><span class="post">${esc(h.post || '–')}</span></td>` +
           `<td><b>${open ? '▾' : '▸'} ${esc(h.horse)}</b></td><td>${esc(h.ml)}</td>` +
           `<td>${h.style.style ? `<span class="style style-${h.style.style}" title="${esc(styleTitle(h.style))}">${h.style.style}</span>` : '<span class="hint" title="No running-line data yet">–</span>'}</td>` +
-          `<td class="num"><b>${fmt(h.rating)}</b>${h.rank ? ` <span class="hint">#${h.rank}</span>` : ''}</td><td class="num">${fmt(h.last)}</td><td class="num">${fmt(h.best)}</td>` +
+          `<td class="num"><b>${fmt(h.rating)}</b>${h.rank ? ` <span class="hint">#${h.rank}</span>` : ''}</td>` +
+          (showPsr ? `<td class="num">${h.psr == null ? '–' : `<b>${fmt(h.psr, 0)}</b> <span class="hint">#${h.psrRank}</span>`}</td>` : '') +
+          `<td class="num">${fmt(h.last)}</td><td class="num">${fmt(h.best)}</td>` +
           `<td class="num ${trendCls}">${h.trend == null ? '–' : (h.trend > 0 ? '+' : '') + fmt(h.trend)}</td>` +
           srcs.map((s) => `<td class="num">${esc(h.latest[s.id] ?? '')}</td>`).join('') +
           `<td class="num ${ag.cls}" title="${h.agreementRuns ? `${h.agreementRuns} runs with 2+ products` : 'Only one product so far'}">${ag.text}</td><td class="num">${h.starts}</td></tr>`;
         if (open) {
-          html += `<tr class="detail"><td></td><td colspan="${8 + srcs.length + 2}">` + (h.races.length ? `<table><tr><th>Date</th><th>Trk</th><th>Dist</th><th>1st call</th>` +
+          html += `<tr class="detail"><td></td><td colspan="${8 + (showPsr ? 1 : 0) + srcs.length + 2}">` + (h.races.length ? `<table><tr><th>Date</th><th>Trk</th><th>Dist</th><th>1st call</th>` +
             srcs.map((s) => `<th class="num">${esc(s.short)}</th>`).join('') + '<th class="num">Unified</th><th class="num">Agree</th></tr>' +
             h.races.map((x) => {
               const byId = Object.fromEntries(x.parts.map((p) => [p.id, p]));
@@ -1007,6 +1023,7 @@
       const { jsPDF } = window.jspdf;
       const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'letter' });
       const srcs = enabled();
+      const showPsr = rep.races.some((r) => r.horses.some((h) => h.psr != null));
       const detail = $('#pdf-detail').checked;
       const W = doc.internal.pageSize.getWidth();
       const M = 36;
@@ -1020,6 +1037,7 @@
         'Rating: unified figure on a Beyer-equivalent scale (higher is better), recency weighted over the last races. #n = rank in the field.',
         'Agree: 0 to 1, how closely the figure products matched on the same runs (1 = identical, 0.5 = about 6 points apart). Order agreement: whether the products rank the field in the same order.',
         'Style from first-call position: E early (on the lead or within 1 length), P presser (within 5), C closer. Product columns show each horse\'s most recent figure.',
+        'PSR: ThoroManager\'s Projected Speed Rating for this race (its own forecast, not part of Rating), with its rank in the field.',
         `Made ${new Date().toISOString().slice(0, 10)} from ${state.races.length} saved races. Figures are estimates.`,
       ];
       doc.text(legend.map(pdfText), M, M + 22);
@@ -1031,13 +1049,15 @@
         doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
         doc.text(pdfText(`Race ${r.race}`), M, y + 10);
         doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+        const pick = psrPick(r);
         const meta = [r.distance, SURFACE_NAME[r.surface] || r.surface, r.conditions,
           r.order ? `Order agreement ${r.order.score.toFixed(2)} (${agreeLabel(r.order.score).word})` : null,
-          `Early speed: ${r.earlyCount} E`].filter(Boolean).join('   |   ');
+          `Early speed: ${r.earlyCount} E`, pick ? pick.text : null].filter(Boolean).join('   |   ');
         doc.text(pdfText(meta), M + 58, y + 10);
-        const head = [['PP', 'Horse', 'ML', 'Style', 'Rating', 'Rank', 'Last', 'Best', 'Trend', ...srcs.map((s) => s.short), 'Agree', 'Starts']];
+        const head = [['PP', 'Horse', 'ML', 'Style', 'Rating', 'Rank', ...(showPsr ? ['PSR', 'PSR rank'] : []), 'Last', 'Best', 'Trend', ...srcs.map((s) => s.short), 'Agree', 'Starts']];
         const body = r.horses.map((h) => [
-          h.post || '-', h.horse, h.ml || '', h.style.style || '-', fmt(h.rating), h.rank || '-', fmt(h.last), fmt(h.best),
+          h.post || '-', h.horse, h.ml || '', h.style.style || '-', fmt(h.rating), h.rank || '-',
+          ...(showPsr ? [h.psr == null ? '-' : fmt(h.psr, 0), h.psrRank || '-'] : []), fmt(h.last), fmt(h.best),
           h.trend == null ? '-' : (h.trend > 0 ? '+' : '') + fmt(h.trend),
           ...srcs.map((s) => h.latest[s.id] ?? ''), h.agreement == null ? '-' : h.agreement.toFixed(2), String(h.starts),
         ].map(pdfText));

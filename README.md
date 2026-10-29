@@ -51,10 +51,13 @@ For each horse:
 
   When there are no running lines, a style printed in the PPs is used instead (Brisnet's E and E/P count as E, and S counts as C).
 
+- **PSR:** ThoroManager's Projected Speed Rating for the race, read from its PDF PPs, with each horse's PSR rank in the field. It's ThoroManager's own forecast, so it sits beside the rating and is not blended into it. First-time starters have none. Entry CSVs can carry a `psr` column.
+
 For each race:
 
 - **Order agreement:** whether the products rank the field in the same order. It is Kendall's tau between each pair of products, rescaled to 0 to 1.
 - **Early speed:** how many E types are in the field.
+- **PSR vs Rating:** whether ThoroManager's top PSR horse is also the top-rated horse.
 
 **Download PDF report** builds a landscape PDF of the whole card in the page itself. It can include each horse's last 6 races. Viewing cards and making PDFs never uses Claude; only reading new files does.
 

@@ -121,3 +121,20 @@ test('products not in use are filed under the one PP product in use', () => {
   assert.doesNotMatch(prompt, /- equibase:/);
   assert.equal(X.normalizeExtraction({ product: 'equibase', races: [{ horse: 'A', date: '2026-10-01', figure: '88' }] }, null, '2026-10-29', map).rows[0].thoromanager, '88');
 });
+
+test('PSR is read from entries, kept on the card and ranked in the field', () => {
+  const x = X.normalizeExtraction({ product: 'thoromanager', races: [], entries: [
+    { horse: 'A', track: 'KEE', date: '2026-10-31', race: '5', post: '1', psr: 98 },
+    { horse: 'B', track: 'KEE', date: '2026-10-31', race: '5', post: '2', psr: 'null' },
+    { horse: 'C', track: 'KEE', date: '2026-10-31', race: '5', post: '3', psr: '101' },
+  ] });
+  assert.deepEqual(x.entries.map((e) => e.psr), ['98', undefined, '101']);
+  const { cards } = C.mergeEntries({}, x.entries);
+  const card = C.buildCard('KEE_2026-10-31', cards['KEE_2026-10-31'], [], F.cloneSources());
+  assert.deepEqual(card.races[0].horses.map((h) => [h.horse, h.psr, h.psrRank]), [['A', 98, 2], ['B', null, undefined], ['C', 101, 1]]);
+  // A CSV with a psr column works too.
+  const csv = F.parseCSV('track,date,race,post,horse,PSR\nKEE,2026-10-31,5,4,D,95').races;
+  assert.equal(C.mergeEntries(cards, csv).cards['KEE_2026-10-31'].races['5'].entries.find((e) => e.horse === 'D').psr, '95');
+  assert.match(X.buildPrompt({ text: 'x' }), /psr \(ThoroManager's PSR/);
+  assert.match(X.buildPrompt({ text: 'x' }), /Never the Horse Speed Graph/);
+});
