@@ -1,0 +1,11 @@
+{
+  "name": "horsey",
+  "version": "1.0.0",
+  "description": "Convert Beyer, Ragozin, Thoro-Graph, Brisnet, TimeformUS, Equibase and ThoroManager speed figures into one unified figure.",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test",
+    "start": "python3 -m http.server 8000"
+  }
+}

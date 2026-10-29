@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Horsey Unified Figures</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Horsey <span>Unified Speed Figures</span></h1>
+    <p class="tag">Beyer, Ragozin, Thoro-Graph, Brisnet, TimeformUS, Equibase, ThoroManager &rarr; one number on a Beyer-equivalent scale.</p>
+    <nav>
+      <button data-tab="convert" class="active">Quick convert</button>
+      <button data-tab="figures">Figures</button>
+      <button data-tab="rankings">Rankings</button>
+      <button data-tab="calibration">Calibration</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- Quick convert -->
+    <section id="tab-convert" class="tab active">
+      <h2>Quick convert</h2>
+      <p class="hint">Translate one figure into every other product's scale.</p>
+      <div class="row">
+        <label>Source <select id="cv-source"></select></label>
+        <label>Figure <input id="cv-value" value="100" size="6"></label>
+        <label>Distance <input id="cv-dist" value="1 1/16m" size="10"></label>
+      </div>
+      <div id="cv-out"></div>
+      <h3>Blend one race</h3>
+      <p class="hint">Enter whatever figures you have for a single run; blanks are ignored.</p>
+      <div class="row" id="blend-inputs"></div>
+      <div id="blend-out"></div>
+    </section>
+
+    <!-- Figures -->
+    <section id="tab-figures" class="tab">
+      <h2>Figures</h2>
+      <p class="hint">One row per race run. Sheet notation like <code>12-</code>, <code>9"</code>, <code>F7+</code> is understood. Distances like <code>6f</code>, <code>1 1/16m</code>, <code>1m70y</code>.</p>
+      <div class="row">
+        <button id="add-row">+ Add row</button>
+        <button id="load-sample">Load sample data</button>
+        <label class="file">Import CSV<input type="file" id="csv-file" accept=".csv,.tsv,.txt"></label>
+        <button id="paste-toggle">Paste CSV</button>
+        <button id="export-csv">Export CSV</button>
+        <button id="clear-all" class="danger">Clear all</button>
+      </div>
+      <div id="paste-box" hidden>
+        <textarea id="paste-text" rows="8" placeholder="horse,date,track,distance,beyer,ragozin,thorograph,brisnet,timeform,equibase,thoromanager&#10;..."></textarea>
+        <button id="paste-apply">Append rows</button>
+      </div>
+      <p id="import-msg" class="hint"></p>
+      <div class="scroll"><table id="fig-table"></table></div>
+    </section>
+
+    <!-- Rankings -->
+    <section id="tab-rankings" class="tab">
+      <h2>Rankings</h2>
+      <div class="row">
+        <label>Last <input id="opt-lastn" type="number" min="1" max="20" value="6" style="width:4em"> races</label>
+        <label>Recency decay <input id="opt-decay" type="number" min="0.3" max="1" step="0.05" value="0.8" style="width:5em"></label>
+        <label>Horses <input id="opt-filter" placeholder="filter by name" size="14"></label>
+      </div>
+      <p class="hint">Rating = recency- and confidence-weighted average of each horse's race-level unified figures. Spread = how far the products disagree about the same run.</p>
+      <div class="scroll"><table id="rank-table"></table></div>
+    </section>
+
+    <!-- Calibration -->
+    <section id="tab-calibration" class="tab">
+      <h2>Calibration</h2>
+      <p class="hint">
+        Unified = intercept + slope &times; figure &times; (8 &divide; furlongs, for length-based sheets only).
+        Defaults are rules of thumb. With a few dozen races where you hold two or more products,
+        <b>Fit from my data</b> estimates each product's scale against the consensus of the others (Beyer is the fixed anchor).
+      </p>
+      <div class="row">
+        <button id="fit">Fit from my data</button>
+        <button id="reset-cal">Reset to defaults</button>
+        <span id="fit-msg" class="hint"></span>
+      </div>
+      <div class="scroll"><table id="cal-table"></table></div>
+      <h3>Equivalence chart</h3>
+      <div class="row"><label>At distance <input id="chart-dist" value="6f" size="8"></label></div>
+      <div class="scroll"><table id="eq-table"></table></div>
+    </section>
+  </main>
+
+  <footer>Figures are estimates. Calibrate against your own data before betting real money on them.</footer>
+
+  <script src="lib/figures.js"></script>
+  <script src="lib/sample-data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
