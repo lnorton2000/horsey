@@ -59,7 +59,7 @@ For each race:
 - **Early speed:** how many E types are in the field.
 - **PSR vs Rating:** whether ThoroManager's top PSR horse is also the top-rated horse.
 
-**Download PDF report** builds a landscape PDF of the whole card in the page itself. It can include each horse's last 6 races. Viewing cards and making PDFs never uses Claude; only reading new files does.
+**Download PDF report** builds a landscape PDF of the whole card in the page itself. By default it is a summary: one table per race. Tick **Also include each horse's past races** to add each horse's last 6 races. Viewing cards and making PDFs never uses Claude; only reading new files does.
 
 ## Dropping in raw PPs and sheets
 

@@ -1145,6 +1145,9 @@
     }
   }
   $('#card-pdf').addEventListener('click', downloadPdf);
+  // Summary-only by default; remember the choice in this browser.
+  $('#pdf-detail').checked = !!prefs.pdfDetail;
+  $('#pdf-detail').addEventListener('change', (e) => { prefs.pdfDetail = e.target.checked; writeJSON(PREFS_KEY, prefs); });
 
   /* ---------- backup ---------- */
   $('#backup').addEventListener('click', () => {
