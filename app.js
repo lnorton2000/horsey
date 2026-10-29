@@ -261,7 +261,7 @@
         cards[d.id] = JSON.parse(JSON.stringify(body));
       }
       if ([...store.writing.keys()].some((k) => k.startsWith('card:'))) return;
-      if (JSON.stringify(cards) !== JSON.stringify(state.cards)) { state.cards = cards; renderAll(); }
+      if (JSON.stringify(cards) !== JSON.stringify(state.cards)) { state.cards = cards; renderAll(); offerRelink(); }
     }, () => {});
 
     db.doc('settings/main').onSnapshot((snap) => {
@@ -273,6 +273,7 @@
       state.fitReport = body.fitReport || null;
       state.autoCal = body.autoCalibrate !== false;
       renderAll();
+      offerRelink();
     }, () => {});
     renderAll();
   }
@@ -301,11 +302,13 @@
   function mergeOpts() {
     const preferNames = [];
     for (const c of Object.values(state.cards)) for (const r of Object.values(c.races || {})) for (const e of r.entries) preferNames.push(e.horse);
-    return { today: new Date().toISOString().slice(0, 10), sources: src(), preferNames };
+    return { today: new Date().toISOString().slice(0, 10), sources: src(), preferNames, remap: F.productRemap(state.sources) };
   }
 
   function describeCleanup(c) {
     const bits = [];
+    const target = Object.values(F.productRemap(state.sources))[0];
+    if (c.relabeled) bits.push(`${c.relabeled} figures filed under a product you don't use, moved to ${(state.sources.find((s) => s.id === target) || { name: target }).name.replace(/ PPs$/, '')}`);
     if (c.repeats) bits.push(`${c.repeats} repeated runs (a second read that missed the date)`);
     if (c.linked) bits.push(`${c.linked} runs saved separately per product`);
     if (c.aliases.length) bits.push(`${c.aliases.length} horse${c.aliases.length === 1 ? '' : 's'} saved under two names (${c.aliases.map(([a, b]) => `${a} = ${b}`).join(', ')})`);
@@ -315,9 +318,10 @@
 
   /** Saved rows that don't combine correctly yet (saved before the current matching rules). */
   let relinkDismissed = false;
-  let relinkMemo = { rev: -1, result: null };
+  let relinkMemo = { rev: '', result: null };
   function pendingCleanup() {
-    if (relinkMemo.rev !== dataRev) relinkMemo = { rev: dataRev, result: F.cleanupRaces(state.races, mergeOpts()) };
+    const rev = `${dataRev}|${state.sources.map((s) => +!!s.enabled).join('')}|${Object.keys(state.cards).length}`;
+    if (relinkMemo.rev !== rev) relinkMemo = { rev, result: F.cleanupRaces(state.races, mergeOpts()) };
     return relinkMemo.result;
   }
   function offerRelink() {
@@ -403,8 +407,8 @@
   function renderConvert() {
     const sel = $('#cv-source');
     const prev = sel.value || 'beyer';
-    sel.innerHTML = state.sources.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
-    sel.value = state.sources.some((s) => s.id === prev) ? prev : 'beyer';
+    sel.innerHTML = enabled().map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+    sel.value = enabled().some((s) => s.id === prev) ? prev : 'beyer';
 
     const dist = $('#cv-dist').value;
     const fur = F.parseDistance(dist);
@@ -413,18 +417,21 @@
     $('#cv-out').innerHTML =
       `<div class="row"><span>Unified</span><span class="big">${fmt(res.unified)}</span>` +
       `<span class="hint">${fur ? fur + ' furlongs' : '<span class="warn">distance not recognised; sheets assume 1 mile</span>'}</span></div>` +
-      '<div class="cards">' + res.equivalents.filter((e) => e.id !== sel.value).map((e) => {
+      '<div class="cards">' + res.equivalents.filter((e) => e.id !== sel.value && enabled().some((s) => s.id === e.id)).map((e) => {
         const s = src().find((x) => x.id === e.id);
         const p = s.lengthBased ? 2 : 0;
         return `<div class="card"><div class="k">${esc(s.name)}</div><div class="v">${fmt(e.value, p)}</div></div>`;
       }).join('') + '</div>';
 
     const box = $('#blend-inputs');
-    if (!box.dataset.built) {
-      box.innerHTML = `<label>Distance <input id="blend-distance" data-blend="distance" value="1m" size="8"></label>` +
-        state.sources.map((s) => `<label>${esc(s.short)} <input id="blend-${s.id}" data-blend="${s.id}" size="5"></label>`).join('');
-      box.dataset.built = '1';
-      box.addEventListener('input', renderBlend);
+    const used = enabled().map((s) => s.id).join(',');
+    if (box.dataset.built !== used) {
+      const keep = {};
+      box.querySelectorAll('[data-blend]').forEach((i) => { keep[i.dataset.blend] = i.value; });
+      box.innerHTML = `<label>Distance <input id="blend-distance" data-blend="distance" value="${esc(keep.distance ?? '1m')}" size="8"></label>` +
+        enabled().map((s) => `<label>${esc(s.short)} <input id="blend-${s.id}" data-blend="${s.id}" value="${esc(keep[s.id] ?? '')}" size="5"></label>`).join('');
+      if (!box.dataset.built) box.addEventListener('input', renderBlend);
+      box.dataset.built = used;
     }
     renderBlend();
   }
@@ -565,6 +572,15 @@
   const X = window.Extract;
   const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
   const raw = { sample: null, limits: null, ctl: null, rows: [], entries: [], running: false, seq: 0 };
+
+  function renderProductPicker() {
+    const sel = $('#raw-product');
+    const prev = sel.value || 'auto';
+    const label = { beyer: 'DRF (Beyer)' };
+    sel.innerHTML = '<option value="auto">Detect automatically</option>' +
+      enabled().map((s) => `<option value="${s.id}">${esc(label[s.id] || s.name)}</option>`).join('');
+    sel.value = [...sel.options].some((op) => op.value === prev) ? prev : 'auto';
+  }
 
   async function initSample() {
     try { raw.sample = window.claude ? await window.claude.use('sample') : null; } catch (e) { raw.sample = null; }
@@ -715,12 +731,12 @@
       let done = 0, found = 0, failed = 0, stopReason = '';
       const today = new Date().toISOString().slice(0, 10);
       const runJob = async (job) => {
-        const prompt = X.buildPrompt({ product, today, source: job.source, text: job.kind === 'text' ? job.text : undefined, images: job.blobs ? job.blobs.length : 0 });
+        const prompt = X.buildPrompt({ product, products: state.sources.filter((s) => s.enabled).map((s) => s.id), today, source: job.source, text: job.kind === 'text' ? job.text : undefined, images: job.blobs ? job.blobs.length : 0 });
         const opts = { signal: raw.ctl.signal, cache: { gcTime: 86400000 } };
         if (job.blobs) opts.images = job.blobs;
         try {
           const answer = await raw.sample.json(prompt, opts);
-          const res = X.normalizeExtraction(answer, product === 'auto' ? null : product, today);
+          const res = X.normalizeExtraction(answer, product === 'auto' ? null : product, today, F.productRemap(state.sources));
           for (const r of res.rows) raw.rows.push(Object.assign(r, { _id: ++raw.seq, _src: job.source, _checked: true }));
           raw.entries.push(...res.entries);
           found += res.rows.length;
@@ -1164,7 +1180,7 @@
     $('#auto-cal').checked = auto;
     $('#auto-cal').disabled = ro;
     $('#fit').hidden = auto;
-    const head = '<tr><th>Use</th><th>Product</th><th>Better</th><th>Sheet (lengths)</th><th class="num">Weight</th>' +
+    const head = '<tr><th>I use</th><th>Product</th><th>Better</th><th>Sheet (lengths)</th><th class="num">Weight</th>' +
       '<th class="num">Intercept</th><th class="num">Slope</th><th class="num">Fit n</th><th class="num">r</th><th class="num">RMSE</th><th>Notes</th></tr>';
     const body = cal.sources.map((s, i) => {
       const r = rep[s.id];
@@ -1236,7 +1252,7 @@
     const active = document.querySelector('.tab.active').id;
     if (active === 'tab-card') renderCard();
     if (active === 'tab-convert') renderConvert();
-    if (active === 'tab-figures') renderFigures();
+    if (active === 'tab-figures') { renderFigures(); renderProductPicker(); }
     if (active === 'tab-rankings') renderRankings();
     if (active === 'tab-calibration') renderCalibration();
   }

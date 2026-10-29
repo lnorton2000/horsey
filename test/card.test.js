@@ -99,3 +99,25 @@ test('agreement uses the average pairwise gap, not the extremes', () => {
   assert.equal(d.spread, 6);
   assert.ok(Math.abs(d.gap - 4) < 1e-9);
 });
+
+test('products not in use are filed under the one PP product in use', () => {
+  const src = F.cloneSources().map((s) => Object.assign(s, { enabled: ['beyer', 'thoromanager', 'ragozin'].includes(s.id) }));
+  const map = F.productRemap(src);
+  assert.deepEqual(map, { brisnet: 'thoromanager', timeform: 'thoromanager', equibase: 'thoromanager', trackmaster: 'thoromanager' });
+  const r = F.relabelProducts([
+    { horse: 'A', date: '2026-10-01', beyer: '90', equibase: '100' },
+    { horse: 'B', date: '2026-10-01', trackmaster: '95', thoromanager: '95' },
+    { horse: 'C', date: '2026-10-01', ragozin: '9' },
+  ], map);
+  assert.equal(r.relabeled, 2);
+  assert.deepEqual(r.races[0], { horse: 'A', date: '2026-10-01', beyer: '90', thoromanager: '100' });
+  assert.deepEqual(r.races[1], { horse: 'B', date: '2026-10-01', thoromanager: '95' });
+  // Two PP products in use: no guessing.
+  assert.deepEqual(F.productRemap(F.cloneSources().map((s) => Object.assign(s, { enabled: ['beyer', 'thoromanager', 'equibase'].includes(s.id) }))), {});
+
+  const prompt = X.buildPrompt({ products: ['beyer', 'thoromanager', 'ragozin'], text: 'x' });
+  assert.match(prompt, /only uses these products: beyer, thoromanager, ragozin/);
+  assert.match(prompt, /is not Daily Racing Form is thoromanager/);
+  assert.doesNotMatch(prompt, /- equibase:/);
+  assert.equal(X.normalizeExtraction({ product: 'equibase', races: [{ horse: 'A', date: '2026-10-01', figure: '88' }] }, null, '2026-10-29', map).rows[0].thoromanager, '88');
+});
