@@ -655,17 +655,24 @@
       const content = await page.getTextContent();
       const text = X.layoutText(content.items.map((it) => ({ str: it.str, x: it.transform[4], y: it.transform[5], w: it.width, h: it.height })));
       const source = `${file.name} p.${n}`;
-      if (text.replace(/\s/g, '').length >= 30) {
+      const vp1 = page.getViewport({ scale: 1 });
+      const ops = await page.getOperatorList();
+      const pictureShare = X.imageCoverage(ops.fnArray, ops.argsArray, lib.OPS, vp1.width * vp1.height);
+      const hasText = text.replace(/\s/g, '').length >= 30;
+      // Sheets need the picture: a figure's height on the page is its month.
+      // Also any page that is mostly a picture (a scanned sheet with a caption).
+      const needsPicture = !hasText || pictureShare >= 0.2 || X.looksLikeSheet(text);
+      if (!needsPicture) {
         jobs.push({ kind: 'text', text, source });
+      } else if (!raw.limits || !raw.limits.images) {
+        if (hasText) jobs.push({ kind: 'text', text, source });
       } else {
-        // Scanned page with no text layer: send a picture instead.
-        const vp1 = page.getViewport({ scale: 1 });
         const vp = page.getViewport({ scale: Math.min(3, 2400 / Math.max(vp1.width, vp1.height)) });
         const c = document.createElement('canvas');
         c.width = Math.round(vp.width);
         c.height = Math.round(vp.height);
         await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
-        jobs.push({ kind: 'images', blobs: await tiles(c, c.width, c.height), source });
+        jobs.push({ kind: 'images', blobs: await tiles(c, c.width, c.height), source, text: hasText ? text : undefined });
       }
     }
     return jobs;
@@ -731,7 +738,7 @@
       let done = 0, found = 0, failed = 0, stopReason = '';
       const today = new Date().toISOString().slice(0, 10);
       const runJob = async (job) => {
-        const prompt = X.buildPrompt({ product, products: state.sources.filter((s) => s.enabled).map((s) => s.id), today, source: job.source, text: job.kind === 'text' ? job.text : undefined, images: job.blobs ? job.blobs.length : 0 });
+        const prompt = X.buildPrompt({ product, products: state.sources.filter((s) => s.enabled).map((s) => s.id), today, source: job.source, text: job.text, images: job.blobs ? job.blobs.length : 0 });
         const opts = { signal: raw.ctl.signal, cache: { gcTime: 86400000 } };
         if (job.blobs) opts.images = job.blobs;
         try {

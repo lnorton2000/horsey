@@ -154,11 +154,11 @@ Blank cells are fine; each race uses whichever products it has.
 Ragozin notation follows the Ragozin symbol sheet:
 
 - Symbols before the figure (track, surface, weather, Lasix and pace notes such as `=`, `.=`, `..`, `◇`, `P~`) are skipped. `=` marks turf and `◇` marks Polytrack, which fills in the surface.
-- Right after the figure, `+` is +¼, `-` is −¼ and `"` is +½, applied arithmetically, so `-2"` = −1.5.
+- Right after the figure, `+` is +¼, `-` is −¼ and `"` is +½. They add to the number's size, so `15-` is 14¾ and `-1"` is −1½, as noted on Ragozin's own sample sheet.
 - Trouble and equipment codes after that (`&`, `s`, `D`, `w`, `<`, `[`, `V` and so on) are ignored.
 - `XX` (did not finish) has no figure.
 
-The reader takes the date from the sheet's year column, month row and the day in the far-right code (`10AP29` = 29th). The sheet's own track code is kept separately as `sheetTrack`, so codes like `KE` vs `KEE` never block a match. In the review step, any figure more than 15 points (after conversion) from the other figures for the same race is marked **check**.
+The reader takes the date from three places: the column header (`9 RACES 93`), the height on the page (December at the top down to January at the bottom) and the day in the far-right code (`10AP29` = 29th). It skips the today line (`MALE 4YO 14AUG91`). A sheet page always goes to Claude as a picture, with any PDF text alongside, because a figure's height is its month. The same applies to any page that is mostly a picture, such as a scanned sheet with a caption. The sheet's own track code is kept separately as `sheetTrack`, so codes like `KE` vs `KEE` never block a match. In the review step, any figure more than 15 points (after conversion) from the other figures for the same race is marked **check**.
 
 **Export CSV** writes every row back out with its unified figure, spread and the number of sources used.
 
