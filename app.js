@@ -240,6 +240,7 @@
   $('#migrate-no').addEventListener('click', () => { $('#migrate').hidden = true; });
 
   function boot() {
+    initSample();
     if (!window.claude || typeof window.claude.use !== 'function') { startLocal(); return; }
     setStatus('Connecting to your saved data…', 'busy');
     window.claude.use('db').then((db) => (db ? startCloud(db) : startLocal()), startLocal);
@@ -395,7 +396,13 @@
   });
   $('#load-sample').addEventListener('click', () => importText(SAMPLE_CSV, 'the fictional sample'));
   $('#paste-toggle').addEventListener('click', () => { $('#paste-box').hidden = !$('#paste-box').hidden; });
-  $('#paste-apply').addEventListener('click', () => { importText($('#paste-text').value, 'pasted text'); $('#paste-text').value = ''; });
+  $('#paste-apply').addEventListener('click', () => {
+    const text = $('#paste-text').value;
+    $('#paste-text').value = '';
+    // Rows with figure columns import directly; anything else (text copied out of a PP) goes to Claude.
+    if (hasFigureColumns(F.parseCSV(text).races) || !raw.sample) importText(text, 'pasted text');
+    else processRawFiles([new File([text], 'pasted text.txt', { type: 'text/plain' })]);
+  });
   $('#csv-file').addEventListener('change', async (e) => {
     const files = Array.from(e.target.files || []);
     e.target.value = '';
@@ -429,6 +436,297 @@
     persist();
     return note;
   }
+
+  /* ---------- raw files: PDFs and photos read by Claude ---------- */
+  const X = window.Extract;
+  const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+  const raw = { sample: null, limits: null, ctl: null, rows: [], running: false, seq: 0 };
+
+  async function initSample() {
+    try { raw.sample = window.claude ? await window.claude.use('sample') : null; } catch (e) { raw.sample = null; }
+    if (raw.sample) {
+      try { raw.limits = await raw.sample.limits(); } catch (e) { raw.limits = null; }
+    }
+    $('#raw-cost').textContent = raw.sample
+      ? 'Claude reads PDFs and photos on your account, so it uses some of your Claude usage. Nothing is saved until you check it.'
+      : 'Reading PDFs and photos uses Claude, which works on the hosted page at claude.ai. CSV files import here.';
+  }
+
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = resolve;
+      s.onerror = () => reject(new Error('Could not load the PDF reader. Check your connection and try again.'));
+      document.head.appendChild(s);
+    });
+  }
+  let pdfReady;
+  function pdfjs() {
+    // The worker script runs on the main thread (pdf.js picks up window.pdfjsWorker),
+    // because the page can't start workers from another site.
+    pdfReady = pdfReady || loadScript(PDFJS + 'pdf.min.js').then(() => loadScript(PDFJS + 'pdf.worker.min.js')).then(() => window.pdfjsLib);
+    return pdfReady;
+  }
+
+  const kindOf = (f) => (/\.pdf$/i.test(f.name) || f.type === 'application/pdf' ? 'pdf'
+    : /^image\//.test(f.type) || /\.(jpe?g|png|webp|gif|heic)$/i.test(f.name) ? 'image' : 'text');
+
+  /** Split a tall page or photo into overlapping strips so small print stays legible. */
+  async function tiles(source, w, h) {
+    const max = Math.max(1, Math.min((raw.limits && raw.limits.images && raw.limits.images.maxCount) || 3, 3));
+    const n = Math.min(max, h > w * 2.2 ? 3 : h > w * 1.2 ? 2 : 1);
+    const overlap = n > 1 ? Math.round(h * 0.04) : 0;
+    const step = Math.ceil(h / n);
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const y0 = Math.max(0, i * step - overlap);
+      const y1 = Math.min(h, (i + 1) * step + overlap);
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = y1 - y0;
+      c.getContext('2d').drawImage(source, 0, y0, w, y1 - y0, 0, 0, w, y1 - y0);
+      out.push(await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.9)));
+    }
+    return out;
+  }
+
+  async function imageJob(file) {
+    const url = URL.createObjectURL(file);
+    try {
+      const img = await new Promise((resolve, reject) => {
+        const i = new Image();
+        i.onload = () => resolve(i);
+        i.onerror = () => reject(new Error(`${file.name} isn't an image this browser can open. Try a JPEG or PNG.`));
+        i.src = url;
+      });
+      return { kind: 'images', blobs: await tiles(img, img.naturalWidth, img.naturalHeight), source: file.name };
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  async function pdfJobs(file) {
+    const lib = await pdfjs();
+    const doc = await lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+    const jobs = [];
+    for (let n = 1; n <= doc.numPages; n++) {
+      const page = await doc.getPage(n);
+      const content = await page.getTextContent();
+      const text = X.layoutText(content.items.map((it) => ({ str: it.str, x: it.transform[4], y: it.transform[5], w: it.width, h: it.height })));
+      const source = `${file.name} p.${n}`;
+      if (text.replace(/\s/g, '').length >= 30) {
+        jobs.push({ kind: 'text', text, source });
+      } else {
+        // Scanned page with no text layer: send a picture instead.
+        const vp1 = page.getViewport({ scale: 1 });
+        const vp = page.getViewport({ scale: Math.min(3, 2400 / Math.max(vp1.width, vp1.height)) });
+        const c = document.createElement('canvas');
+        c.width = Math.round(vp.width);
+        c.height = Math.round(vp.height);
+        await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+        jobs.push({ kind: 'images', blobs: await tiles(c, c.width, c.height), source });
+      }
+    }
+    return jobs;
+  }
+
+  function textJobs(text, source) {
+    const jobs = [];
+    const CHUNK = 14000;
+    for (let i = 0, part = 1; i < text.length; i += CHUNK, part++) {
+      jobs.push({ kind: 'text', text: text.slice(i, i + CHUNK), source: text.length > CHUNK ? `${source} part ${part}` : source });
+    }
+    return jobs;
+  }
+
+  const hasFigureColumns = (races) => races.some((r) => X.PRODUCT_IDS.some((p) => r[p] != null));
+
+  function progress(text) {
+    $('#raw-progress').hidden = false;
+    $('#raw-progress-text').textContent = text;
+    $('#raw-stop').hidden = !raw.running;
+  }
+
+  const SAMPLE_ERRORS = {
+    not_granted: 'Claude wasn\'t allowed to read files on this page. Reload and choose Allow to read PDFs and photos.',
+    sampling_disabled: 'Claude isn\'t available on this account, so PDFs and photos can\'t be read here. CSV files still work.',
+    rate_limited: 'You\'ve hit a Claude usage limit. What was read so far is below; drop the remaining files again later.',
+    session_expired: 'Your claude.ai session expired. Sign in again, then drop the files again.',
+    images_unavailable: 'Photos and scanned pages can\'t be read in this view. PDFs with text and CSV files still work.',
+  };
+
+  async function processRawFiles(files) {
+    if (!canEdit() || raw.running || !files.length) return;
+    const product = $('#raw-product').value;
+    const jobs = [];
+    const notes = [];
+    raw.running = true;
+    raw.ctl = new AbortController();
+    try {
+      progress('Opening files…');
+      for (const f of files) {
+        const kind = kindOf(f);
+        try {
+          if (kind === 'text') {
+            const text = await f.text();
+            const parsed = F.parseCSV(text);
+            if (hasFigureColumns(parsed.races)) { notes.push(importText(text, f.name, true)); continue; }
+            if (raw.sample) jobs.push(...textJobs(text, f.name));
+            else notes.push(`${f.name}: no figure columns found.`);
+          } else if (!raw.sample) {
+            notes.push(`${f.name}: reading PDFs and photos needs the hosted page at claude.ai.`);
+          } else if (kind === 'pdf') {
+            jobs.push(...await pdfJobs(f));
+          } else {
+            if (!raw.limits || !raw.limits.images) { notes.push(`${f.name}: ${SAMPLE_ERRORS.images_unavailable}`); continue; }
+            jobs.push(await imageJob(f));
+          }
+        } catch (e) {
+          notes.push(`${f.name}: couldn't be opened (${(e && e.message) || 'unknown error'}).`);
+        }
+      }
+      if (notes.length) { flash(notes.join(' ')); persist(); }
+
+      let done = 0, found = 0, failed = 0, stopReason = '';
+      const today = new Date().toISOString().slice(0, 10);
+      const runJob = async (job) => {
+        const prompt = X.buildPrompt({ product, today, source: job.source, text: job.kind === 'text' ? job.text : undefined, images: job.blobs ? job.blobs.length : 0 });
+        const opts = { signal: raw.ctl.signal, cache: { gcTime: 86400000 } };
+        if (job.blobs) opts.images = job.blobs;
+        try {
+          const answer = await raw.sample.json(prompt, opts);
+          const res = X.normalizeExtraction(answer, product === 'auto' ? null : product);
+          for (const r of res.rows) raw.rows.push(Object.assign(r, { _id: ++raw.seq, _src: job.source, _checked: !!r.date }));
+          found += res.rows.length;
+          renderRaw();
+        } catch (e) {
+          const code = e && e.code;
+          if (code === 'cancelled') { stopReason = stopReason || 'Stopped.'; return; }
+          if (SAMPLE_ERRORS[code] && code !== 'images_unavailable') { stopReason = SAMPLE_ERRORS[code]; raw.ctl.abort(); return; }
+          failed++;
+        } finally {
+          done++;
+          if (!stopReason) progress(`Reading page ${Math.min(done + 1, jobs.length)} of ${jobs.length}… ${found} races found so far.`);
+        }
+      };
+      if (jobs.length) {
+        progress(`Reading page 1 of ${jobs.length}…`);
+        let next = 0;
+        const worker = async () => { while (next < jobs.length && !raw.ctl.signal.aborted) await runJob(jobs[next++]); };
+        await Promise.all([worker(), worker()]);
+      }
+      raw.running = false;
+      const filled = X.resolveMonthOnlyDates(raw.rows.filter((r) => !r.date), state.races.concat(raw.rows.filter((r) => r.date)));
+      for (const r of raw.rows) if (r.dateFrom === 'matched' && !r._touched) r._checked = true;
+      if (jobs.length) {
+        const bits = [`Read ${done} page${done === 1 ? '' : 's'}: ${found} races found.`];
+        if (filled) bits.push(`${filled} sheet dates matched to known races.`);
+        if (failed) bits.push(`${failed} page${failed === 1 ? '' : 's'} couldn't be read; drop that file again to retry.`);
+        if (stopReason) bits.push(stopReason);
+        progress(bits.join(' '));
+      } else {
+        $('#raw-progress').hidden = true;
+      }
+      renderRaw();
+    } finally {
+      raw.running = false;
+      $('#raw-stop').hidden = true;
+    }
+  }
+
+  function rawStatus(r) {
+    if (!r.date) return '<span class="pill warn">needs a date</span>';
+    const k = F.raceKey(r);
+    const saved = state.races.some((s) => F.raceKey(s) === k);
+    const tag = r.dateFrom === 'matched' ? ' (day matched)' : '';
+    if (saved) return `<span class="pill ok">adds to a saved race${tag}</span>`;
+    const first = raw.rows.find((o) => o._checked && F.raceKey(o) === k);
+    if (first && first !== r) {
+      const p = X.PRODUCT_IDS.find((id) => first[id] != null);
+      return `<span class="pill ok">same race as the ${esc((state.sources.find((s) => s.id === p) || { short: p }).short)} row${tag}</span>`;
+    }
+    return `<span class="pill">new race${tag}</span>`;
+  }
+
+  function renderRaw() {
+    const box = $('#raw-review');
+    if (!raw.rows.length) { box.hidden = true; return; }
+    box.hidden = false;
+    const name = (id) => (state.sources.find((s) => s.id === id) || { short: id }).short;
+    const head = '<tr><th></th><th>Horse</th><th>Date</th><th>Trk</th><th>Dist</th><th>Product</th><th>Figure</th><th>Status</th><th>From</th></tr>';
+    const body = raw.rows.map((r) => {
+      const p = X.PRODUCT_IDS.find((id) => r[id] != null);
+      const inp = (k, cls) => `<input type="text" id="raw-${r._id}-${k}" data-raw="${r._id}" data-key="${k}" value="${esc(r[k])}" class="${cls || ''}" aria-label="${k}">`;
+      return `<tr><td><input type="checkbox" id="raw-${r._id}-check" data-raw="${r._id}" data-key="_checked" aria-label="Save this race"${r._checked ? ' checked' : ''}></td>` +
+        `<td>${inp('horse')}</td><td>${inp('date', 'date')}${!r.date && r.month ? `<div class="hint">${esc(r.month)}</div>` : ''}</td>` +
+        `<td>${inp('track')}</td><td>${inp('distance')}</td><td>${esc(name(p))}</td><td>${inp(p)}</td>` +
+        `<td>${rawStatus(r)}</td><td class="hint">${esc(r._src)}</td></tr>`;
+    }).join('');
+    $('#raw-table').innerHTML = head + body;
+    const checked = raw.rows.filter((r) => r._checked).length;
+    const undated = raw.rows.filter((r) => !r.date).length;
+    $('#raw-save').textContent = `Save ${checked} checked race${checked === 1 ? '' : 's'}`;
+    $('#raw-save').disabled = !checked || raw.running;
+    $('#raw-summary').textContent = `${raw.rows.length} races read.` +
+      (undated ? ` ${undated} have no date yet: type one in (YYYY-MM-DD) and check the box, or leave them unchecked.` : '') +
+      ' Fix anything that looks wrong before saving.';
+  }
+
+  $('#raw-table').addEventListener('change', (e) => {
+    const t = e.target;
+    const r = raw.rows.find((x) => x._id === +t.dataset.raw);
+    if (!r) return;
+    r._touched = true;
+    if (t.dataset.key === '_checked') r._checked = t.checked;
+    else {
+      const v = t.value.trim();
+      if (!v) delete r[t.dataset.key];
+      else r[t.dataset.key] = t.dataset.key === 'date' ? F.normalizeDate(v) : v;
+      if (t.dataset.key === 'date') { delete r.dateFrom; r._checked = !!r.date; }
+    }
+    renderRaw();
+  });
+  $('#raw-all').addEventListener('change', (e) => {
+    for (const r of raw.rows) r._checked = e.target.checked && !!r.date;
+    renderRaw();
+  });
+  $('#raw-save').addEventListener('click', () => {
+    const picked = raw.rows.filter((r) => r._checked).map((r) => {
+      const o = {};
+      for (const [k, v] of Object.entries(r)) if (!k.startsWith('_') && k !== 'month' && k !== 'dateFrom') o[k] = v;
+      return o;
+    });
+    const res = F.mergeRaces(state.races, picked);
+    state.races = res.races;
+    raw.rows = raw.rows.filter((r) => !r._checked);
+    flash(`Saved: ${res.added} new races, ${res.updated} existing races got new figures, ${res.unchanged} were already saved.`);
+    $('#raw-progress').hidden = true;
+    persist();
+    renderRaw();
+  });
+  confirmButton($('#raw-discard'), () => `Discard ${raw.rows.length} unsaved races?`, () => {
+    raw.rows = [];
+    $('#raw-progress').hidden = true;
+    renderRaw();
+  });
+  $('#raw-stop').addEventListener('click', () => { if (raw.ctl) raw.ctl.abort(); });
+
+  const dz = $('#dropzone');
+  dz.addEventListener('click', () => $('#raw-files').click());
+  dz.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('#raw-files').click(); } });
+  dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('over'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+  dz.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dz.classList.remove('over');
+    processRawFiles(Array.from(e.dataTransfer.files || []));
+  });
+  $('#raw-files').addEventListener('change', (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    processRawFiles(files);
+  });
 
   /* ---------- backup ---------- */
   $('#backup').addEventListener('click', () => {

@@ -35,6 +35,20 @@ To rebuild the single-file hosted version after changing the code:
 npm run build:artifact
 ```
 
+## Dropping in raw PPs and sheets
+
+On the hosted page you don't need to format anything. Drop files on the **Figures** tab:
+
+- PDFs straight from DRF, Brisnet, TimeformUS, Equibase, TrackMaster, ThoroManager, Ragozin or Thoro-Graph
+- photos or scans of sheets
+- text copied out of a PP (paste it into **Paste rows**)
+
+Claude reads each page on your Claude account (it uses some of your usage) and lists every past race with its figure. Nothing is saved until you check the list and click **Save**. Text-based PDFs are read from their text layer, keeping the column layout. Scanned pages and photos are sent as images, with tall pages split into strips so small print stays readable. Reading the same file again within 24 hours reuses the earlier answer.
+
+Sheets often show only the month of a race. When exactly one known race for that horse matches the month (and the track, if both show one), the day is filled in from it, so the sheet figure joins the DRF row. Otherwise the row is flagged **needs a date** and left unchecked.
+
+CSV files with figure columns still import directly, without Claude.
+
 ## Importing without duplicates
 
 Upload as often as you like. A horse runs at most once a day, so **horse + date identifies a race**:
@@ -109,6 +123,7 @@ app.js              UI logic (tabs, tables, import/export, account/browser stora
 scripts/            build-artifact.js bundles everything into one page for hosting
 style.css           styles (light and dark)
 lib/figures.js      conversion, blending, calibration, ratings, CSV, merging; no dependencies
+lib/extract.js      PDF text layout, prompt and answer checking for raw-file import
 lib/sample-data.js  fictional demo horses (not real figures)
 test/               node:test unit tests
 ```

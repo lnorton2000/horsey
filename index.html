@@ -45,15 +45,48 @@
     <!-- Figures -->
     <section id="tab-figures" class="tab">
       <h2>Figures</h2>
+      <div id="dropzone" class="dropzone edit-only" tabindex="0" role="button" aria-describedby="drop-help">
+        <strong>Drop your PPs and sheets here</strong>
+        <span id="drop-help">PDFs straight from DRF, Brisnet, TimeformUS, Equibase, Ragozin or Thoro-Graph, photos of sheets, or CSV files. No formatting needed. Or <u>choose files</u>.</span>
+        <input type="file" id="raw-files" multiple accept=".pdf,application/pdf,image/*,.csv,.tsv,.txt" hidden>
+      </div>
+      <div class="row edit-only">
+        <label>These files are <select id="raw-product">
+          <option value="auto">Detect automatically</option>
+          <option value="beyer">DRF (Beyer)</option>
+          <option value="ragozin">Ragozin Sheets</option>
+          <option value="thorograph">Thoro-Graph</option>
+          <option value="brisnet">Brisnet</option>
+          <option value="timeform">TimeformUS</option>
+          <option value="equibase">Equibase</option>
+          <option value="trackmaster">TrackMaster</option>
+          <option value="thoromanager">ThoroManager</option>
+        </select></label>
+        <span class="hint" id="raw-cost">Claude reads PDFs and photos on your account, so it uses some of your Claude usage.</span>
+      </div>
+      <div id="raw-progress" class="banner" hidden>
+        <span id="raw-progress-text" role="status" aria-live="polite"></span>
+        <button id="raw-stop">Stop</button>
+      </div>
+      <div id="raw-review" hidden>
+        <h3>Check what was read, then save</h3>
+        <p class="hint" id="raw-summary"></p>
+        <div class="row">
+          <button id="raw-save" class="primary-btn">Save checked races</button>
+          <button id="raw-discard">Discard</button>
+          <label><input type="checkbox" id="raw-all" checked> Check all with a date</label>
+        </div>
+        <div class="scroll"><table id="raw-table"></table></div>
+      </div>
       <p class="hint">Everything you import is saved automatically. Re-importing a file never creates duplicates: rows for the same horse on the same date are one race, so a DRF file, a Ragozin file and a Thoro-Graph file for the same card fill in the same rows.</p>
       <div class="row edit-only">
-        <label class="file primary">Import files (CSV)<input type="file" id="csv-file" accept=".csv,.tsv,.txt" multiple></label>
+        <label class="file">Import CSV<input type="file" id="csv-file" accept=".csv,.tsv,.txt" multiple></label>
         <button id="paste-toggle">Paste rows</button>
         <button id="add-row">+ Add row</button>
         <button id="load-sample">Load fictional sample</button>
       </div>
       <div id="paste-box" hidden>
-        <textarea id="paste-text" rows="8" placeholder="horse,date,track,distance,beyer,ragozin,thorograph,brisnet,timeform,equibase,thoromanager&#10;..."></textarea>
+        <textarea id="paste-text" rows="8" placeholder="CSV rows with a header (horse,date,track,distance,beyer,ragozin,...), or any text copied out of a PP or sheet"></textarea>
         <button id="paste-apply">Add these rows</button>
       </div>
       <p id="import-msg" class="msg" role="status" aria-live="polite"></p>
@@ -107,6 +140,7 @@
   <footer>Figures are estimates. Calibrate against your own data before betting real money on them.</footer>
 
   <script src="lib/figures.js"></script>
+  <script src="lib/extract.js"></script>
   <script src="lib/sample-data.js"></script>
   <script src="app.js"></script>
 </body>
