@@ -19,15 +19,33 @@ Supported products:
 
 ## Running it
 
-No install and no build step. Open `index.html` in a browser.
+**Hosted (recommended):** open the published page on claude.ai. Everything you import and every calibration change saves to your Claude account automatically, so it is there on any device and survives clearing your browser. The dot under the title shows the save state.
 
-To serve it locally instead:
+**Local:** open `index.html` in a browser, or run:
 
 ```bash
 npm start
 ```
 
-Then go to http://localhost:8000. Your data is saved in your browser's local storage.
+Then go to http://localhost:8000. Run locally, data is saved in that browser only. Use **Download backup** to keep a copy.
+
+To rebuild the single-file hosted version after changing the code:
+
+```bash
+npm run build:artifact
+```
+
+## Importing without duplicates
+
+Upload as often as you like. A horse runs at most once a day, so **horse + date identifies a race**:
+
+- Re-importing a file you already loaded changes nothing.
+- Separate files for the same card merge into the same rows. For example, a DRF file with Beyers, a Ragozin file and a Thoro-Graph file each fill in their own column.
+- A newer file with a corrected figure overwrites the old value. Blank cells never erase anything.
+- Horse names match regardless of case, punctuation or country suffix (`Copper Comet` = `COPPER COMET (IRE)`).
+- Dates match across formats: `2026-08-13`, `8/13/26`, `13Aug26` and `Aug 13, 2026` are the same day.
+
+You can select several files at once in the import dialog.
 
 ## How it works
 
@@ -87,9 +105,10 @@ Sheet notation is understood. Leading flag letters are ignored (`F7` is read as 
 
 ```
 index.html          UI shell
-app.js              UI logic (tabs, tables, import/export, storage)
+app.js              UI logic (tabs, tables, import/export, account/browser storage)
+scripts/            build-artifact.js bundles everything into one page for hosting
 style.css           styles (light and dark)
-lib/figures.js      conversion, blending, calibration, ratings, CSV; no dependencies
+lib/figures.js      conversion, blending, calibration, ratings, CSV, merging; no dependencies
 lib/sample-data.js  fictional demo horses (not real figures)
 test/               node:test unit tests
 ```

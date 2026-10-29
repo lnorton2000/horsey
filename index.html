@@ -2,14 +2,21 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Horsey Unified Figures</title>
+  <meta name="claude:viewport-fit-sides" content="cover">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header>
     <h1>Horsey <span>Unified Speed Figures</span></h1>
     <p class="tag">Beyer, Ragozin, Thoro-Graph, Brisnet, TimeformUS, Equibase, ThoroManager &rarr; one number on a Beyer-equivalent scale.</p>
+    <p id="save-status" role="status" aria-live="polite">Loading…</p>
+    <div id="migrate" class="banner" hidden>
+      <span id="migrate-text"></span>
+      <button id="migrate-yes">Add to my account</button>
+      <button id="migrate-no">Not now</button>
+    </div>
     <nav>
       <button data-tab="convert" class="active">Quick convert</button>
       <button data-tab="figures">Figures</button>
@@ -38,21 +45,31 @@
     <!-- Figures -->
     <section id="tab-figures" class="tab">
       <h2>Figures</h2>
-      <p class="hint">One row per race run. Sheet notation like <code>12-</code>, <code>9"</code>, <code>F7+</code> is understood. Distances like <code>6f</code>, <code>1 1/16m</code>, <code>1m70y</code>.</p>
-      <div class="row">
+      <p class="hint">Everything you import is saved automatically. Re-importing a file never creates duplicates: rows for the same horse on the same date are one race, so a DRF file, a Ragozin file and a Thoro-Graph file for the same card fill in the same rows.</p>
+      <div class="row edit-only">
+        <label class="file primary">Import files (CSV)<input type="file" id="csv-file" accept=".csv,.tsv,.txt" multiple></label>
+        <button id="paste-toggle">Paste rows</button>
         <button id="add-row">+ Add row</button>
-        <button id="load-sample">Load sample data</button>
-        <label class="file">Import CSV<input type="file" id="csv-file" accept=".csv,.tsv,.txt"></label>
-        <button id="paste-toggle">Paste CSV</button>
-        <button id="export-csv">Export CSV</button>
-        <button id="clear-all" class="danger">Clear all</button>
+        <button id="load-sample">Load fictional sample</button>
       </div>
       <div id="paste-box" hidden>
         <textarea id="paste-text" rows="8" placeholder="horse,date,track,distance,beyer,ragozin,thorograph,brisnet,timeform,equibase,thoromanager&#10;..."></textarea>
-        <button id="paste-apply">Append rows</button>
+        <button id="paste-apply">Add these rows</button>
       </div>
-      <p id="import-msg" class="hint"></p>
+      <p id="import-msg" class="msg" role="status" aria-live="polite"></p>
+      <div class="row">
+        <label>Horse <input id="fig-filter" placeholder="filter by name" size="16"></label>
+        <span id="fig-count" class="hint"></span>
+        <button id="delete-shown" class="danger edit-only">Delete shown races</button>
+      </div>
       <div class="scroll"><table id="fig-table"></table></div>
+      <h3>Export and backup</h3>
+      <p class="hint">Your data is already saved. A backup file is an extra copy you keep yourself; restoring one merges it back in without duplicates.</p>
+      <div class="row">
+        <button id="export-csv">Export CSV with unified figures</button>
+        <button id="backup">Download backup</button>
+        <label class="file edit-only">Restore backup<input type="file" id="restore-file" accept=".json,application/json"></label>
+      </div>
     </section>
 
     <!-- Rankings -->

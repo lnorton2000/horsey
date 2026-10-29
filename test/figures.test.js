@@ -113,3 +113,42 @@ test('sample data imports cleanly and fits', () => {
     assert.ok(Math.abs(report[id].r) > 0.9, id);
   }
 });
+
+test('normalizeDate reads common PP date styles', () => {
+  assert.equal(F.normalizeDate('2026-08-13'), '2026-08-13');
+  assert.equal(F.normalizeDate('8/13/26'), '2026-08-13');
+  assert.equal(F.normalizeDate('08/13/2026'), '2026-08-13');
+  assert.equal(F.normalizeDate('13Aug26'), '2026-08-13');
+  assert.equal(F.normalizeDate('13 Aug 2026'), '2026-08-13');
+  assert.equal(F.normalizeDate('Aug 13, 2026'), '2026-08-13');
+  assert.equal(F.normalizeDate('sometime'), 'sometime');
+});
+
+test('mergeRaces combines separate product uploads and ignores re-uploads', () => {
+  const drf = [
+    { horse: 'Copper Comet', date: '8/13/26', track: 'sar', distance: '6f', beyer: '104' },
+    { horse: 'Iron Quill', date: '2026-08-13', beyer: '90' },
+  ];
+  const rag = [{ horse: 'COPPER COMET (IRE)', date: '13Aug26', ragozin: '4"' }];
+
+  let r = F.mergeRaces([], drf);
+  assert.deepEqual([r.added, r.updated, r.unchanged], [2, 0, 0]);
+  r = F.mergeRaces(r.races, rag);
+  assert.deepEqual([r.added, r.updated, r.unchanged], [0, 1, 0]);
+  assert.equal(r.races.length, 2);
+  assert.deepEqual(r.races[0], { horse: 'Copper Comet', date: '2026-08-13', track: 'SAR', distance: '6f', beyer: '104', ragozin: '4"' });
+
+  // Uploading the same files again changes nothing.
+  r = F.mergeRaces(r.races, drf.concat(rag));
+  assert.deepEqual([r.added, r.updated, r.unchanged], [0, 0, 3]);
+
+  // A corrected figure overwrites; blanks never erase.
+  r = F.mergeRaces(r.races, [{ horse: 'Iron Quill', date: '2026-08-13', beyer: '92', ragozin: '' }]);
+  assert.equal(r.updated, 1);
+  assert.equal(r.races[1].beyer, '92');
+  assert.equal(r.races[1].ragozin, undefined);
+
+  // Undated rows: exact duplicates skipped, anything else added.
+  r = F.mergeRaces([], [{ horse: 'X', beyer: '80' }, { horse: 'X', beyer: '80' }, { horse: 'X', beyer: '81' }]);
+  assert.deepEqual([r.added, r.unchanged], [2, 1]);
+});
