@@ -107,11 +107,17 @@ A horse's rating is a recency- and confidence-weighted average of its last N rac
 
 ### 4. Calibration (the important part)
 
+**Automatic calibration** is on by default. Whenever your saved races change, every product with at least 20 races that also have another product's figure is fitted from them, so products that run hot or cold line up before they are blended or compared. Without this, a product that runs 10 points above Beyer (ThoroManager and Equibase both do) makes every horse look like a disagreement. Turn it off on the Calibration tab to set intercepts and slopes by hand; the fitted values are kept as your starting point.
+
 Load races where you have two or more products for the same run, then click **Fit from my data**. Horsey regresses each product against the consensus of all the *other* products, repeats this until the values settle, and reports the sample size, correlation (r) and RMSE for each product. Beyer stays fixed as the anchor of the scale.
 
 The fit uses reduced-major-axis regression rather than ordinary least squares. Both sides of the fit are noisy measurements of the same performance, and ordinary least squares would systematically flatten the slopes.
 
 A product needs at least 5 paired races to be fitted. In practice, a few dozen races across sprints and routes gives stable numbers.
+
+## Linking runs without a date
+
+A run read without a date can't be matched by horse + date. Horsey joins it to another row for the same horse when exactly one row fits: the same track, no product in common, no conflicting month, and at least two of distance, finish position, first-call position and race number agreeing, with none of them contradicting. This happens on every import. For data saved before this existed, a banner offers to join the matches in one click. When two rows fit equally well, nothing is joined.
 
 ## Data format
 

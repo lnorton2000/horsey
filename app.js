@@ -10,11 +10,33 @@
   const $ = (sel) => document.querySelector(sel);
   const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmt = (v, p = 1) => (v == null || !Number.isFinite(v) ? '–' : v.toFixed(p).replace(/^-(0\.?0*)$/, '$1'));
-  const enabled = () => state.sources.filter((s) => s.enabled);
+  const enabled = () => src().filter((s) => s.enabled);
+
+  /*
+   * Calibration actually used for every figure on screen. With automatic
+   * calibration on (the default), each product's scale is fitted from the
+   * saved races whenever they change, so products that run hot or cold
+   * (ThoroManager and Equibase run ~10 points above Beyer) line up before
+   * they are blended or compared.
+   */
+  let dataRev = 0;
+  let calMemo = { key: null, value: null };
+  function calibrated() {
+    const key = `${dataRev}|${state.autoCal}|${JSON.stringify(state.sources)}`;
+    if (calMemo.key === key) return calMemo.value;
+    let value = { sources: state.sources, report: state.fitReport };
+    if (state.autoCal && state.races.length) {
+      const fit = F.fitCalibration(state.races, state.sources, { minPairs: 20 });
+      value = { sources: fit.sources, report: fit.report };
+    }
+    calMemo = { key, value };
+    return value;
+  }
+  const src = () => calibrated().sources;
   const readJSON = (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } };
   const writeJSON = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* storage unavailable */ } };
 
-  const state = { races: [], cards: {}, sources: F.cloneSources(), fitReport: null };
+  const state = { races: [], cards: {}, sources: F.cloneSources(), fitReport: null, autoCal: true };
   const prefs = Object.assign({ open: {} }, readJSON(PREFS_KEY));
 
   function withNewSources(sources) {
@@ -81,8 +103,11 @@
     else setStatus(`Saved to your Claude account · ${state.races.length} races`, 'ok');
   }
 
+  const settingsJSON = () => JSON.stringify({ sources: state.sources, fitReport: state.fitReport, autoCalibrate: state.autoCal });
+
   /** Call after any change to races or calibration. */
   function persist() {
+    dataRev++;
     sortRaces(state.races);
     if (store.mode === 'local') {
       writeJSON(LOCAL_KEY, state);
@@ -98,8 +123,7 @@
         const json = state.cards[id] ? JSON.stringify(state.cards[id]) : null;
         if (json !== (store.serverCards.get(id) ?? null)) scheduleWrite('card:' + id);
       }
-      const settings = JSON.stringify({ sources: state.sources, fitReport: state.fitReport });
-      if (settings !== store.serverSettings) scheduleWrite('@settings');
+      if (settingsJSON() !== store.serverSettings) scheduleWrite('@settings');
       cloudStatus();
     }
     renderAll();
@@ -133,7 +157,7 @@
     let op, json;
     let cardId = null;
     if (id === '@settings') {
-      json = JSON.stringify({ sources: state.sources, fitReport: state.fitReport });
+      json = settingsJSON();
       op = () => store.db.doc('settings/main').set(JSON.parse(json));
     } else if (id.startsWith('card:')) {
       cardId = id.slice(5);
@@ -183,8 +207,11 @@
       state.sources = withNewSources(saved.sources);
       state.fitReport = saved.fitReport || null;
       state.cards = saved.cards || {};
+      state.autoCal = saved.autoCal !== false;
+      dataRev++;
     }
     try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) { /* optional */ }
+    offerRelink();
     setStatus(`Saved in this browser · ${state.races.length} races`, 'ok');
     renderAll();
   }
@@ -217,7 +244,9 @@
       sortRaces(races);
       const before = JSON.stringify(state.races);
       state.races = races;
+      dataRev++;
       if (firstHorses) { firstHorses = false; offerLocalMigration(); }
+      offerRelink();
       cloudStatus();
       if (JSON.stringify(races) !== before) renderAll();
     }, () => setStatus('Lost the connection to your saved data. Reload the page to reconnect.', 'bad'));
@@ -238,10 +267,11 @@
     db.doc('settings/main').onSnapshot((snap) => {
       if (!snap.exists) return;
       const body = snap.data();
-      store.serverSettings = JSON.stringify({ sources: body.sources, fitReport: body.fitReport ?? null });
+      store.serverSettings = JSON.stringify({ sources: body.sources, fitReport: body.fitReport ?? null, autoCalibrate: body.autoCalibrate !== false });
       if (store.writing.has('@settings')) return;
       state.sources = withNewSources(body.sources);
       state.fitReport = body.fitReport || null;
+      state.autoCal = body.autoCalibrate !== false;
       renderAll();
     }, () => {});
     renderAll();
@@ -266,6 +296,23 @@
     persist();
   });
   $('#migrate-no').addEventListener('click', () => { $('#migrate').hidden = true; });
+
+  /** Rows saved before undated runs were linked across products. */
+  let relinkDismissed = false;
+  function offerRelink() {
+    if (relinkDismissed || !canEdit() || store.active + store.queue.length) return;
+    const n = F.linkRaces(state.races).linked;
+    $('#relink').hidden = !n;
+    if (n) $('#relink-text').textContent = `${n} races were saved twice: once per product, because one copy had no date. Join them so their figures are compared?`;
+  }
+  $('#relink-yes').addEventListener('click', () => {
+    const r = F.linkRaces(state.races);
+    state.races = r.races;
+    $('#relink').hidden = true;
+    flash(`Joined ${r.linked} races.`);
+    persist();
+  });
+  $('#relink-no').addEventListener('click', () => { relinkDismissed = true; $('#relink').hidden = true; });
 
   function boot() {
     initSample();
@@ -332,13 +379,13 @@
 
     const dist = $('#cv-dist').value;
     const fur = F.parseDistance(dist);
-    const res = F.convertAcross(state.sources, sel.value, $('#cv-value').value, dist);
+    const res = F.convertAcross(src(), sel.value, $('#cv-value').value, dist);
     if (!res) { $('#cv-out').innerHTML = '<p class="hint">Enter a figure.</p>'; return; }
     $('#cv-out').innerHTML =
       `<div class="row"><span>Unified</span><span class="big">${fmt(res.unified)}</span>` +
       `<span class="hint">${fur ? fur + ' furlongs' : '<span class="warn">distance not recognised; sheets assume 1 mile</span>'}</span></div>` +
       '<div class="cards">' + res.equivalents.filter((e) => e.id !== sel.value).map((e) => {
-        const s = state.sources.find((x) => x.id === e.id);
+        const s = src().find((x) => x.id === e.id);
         const p = s.lengthBased ? 2 : 0;
         return `<div class="card"><div class="k">${esc(s.name)}</div><div class="v">${fmt(e.value, p)}</div></div>`;
       }).join('') + '</div>';
@@ -356,7 +403,7 @@
   function renderBlend() {
     const race = {};
     document.querySelectorAll('[data-blend]').forEach((i) => { race[i.dataset.blend] = i.value; });
-    const c = F.combineRace(race, state.sources);
+    const c = F.combineRace(race, src());
     $('#blend-out').innerHTML = !c ? '<p class="hint">No figures entered.</p>' :
       `<div class="row"><span>Unified</span><span class="big">${fmt(c.unified)}</span>` +
       `<span class="hint">${c.n} source${c.n > 1 ? 's' : ''} &middot; spread ${fmt(c.spread)} &middot; confidence ${Math.round(c.confidence * 100)}%</span></div>` +
@@ -383,7 +430,7 @@
     const head = '<tr>' + cols.map((c) => `<th>${esc(c[1])}</th>`).join('') + '<th class="num">Unified</th><th class="num">Spread</th><th></th></tr>';
     const body = shown.slice(0, MAX_TABLE_ROWS).map((i) => {
       const r = state.races[i];
-      const c = F.combineRace(r, state.sources);
+      const c = F.combineRace(r, src());
       return '<tr>' + cols.map(([k, , cls]) => {
         let bad = false;
         if (cls === 'fig' && r[k] != null && r[k] !== '') bad = F.parseFigure(r[k]) == null;
@@ -454,7 +501,7 @@
     state.races = state.races.filter((_, i) => !drop.has(i));
     persist();
   });
-  $('#export-csv').addEventListener('click', () => offerFile('unified-figures.csv', F.toCSV(state.races, state.sources), 'text/csv'));
+  $('#export-csv').addEventListener('click', () => offerFile('unified-figures.csv', F.toCSV(state.races, src()), 'text/csv'));
 
   /** CSV with race + post columns: today's entries. Track and date may be columns too. */
   function importEntries(rows, label) {
@@ -813,7 +860,7 @@
   function currentReport() {
     const lastN = Math.max(1, +$('#opt-lastn').value || 6);
     const decay = Math.min(1, Math.max(0.3, +$('#opt-decay').value || 0.8));
-    return ui.card && state.cards[ui.card] ? C.buildCard(ui.card, state.cards[ui.card], state.races, state.sources, { lastN, decay }) : null;
+    return ui.card && state.cards[ui.card] ? C.buildCard(ui.card, state.cards[ui.card], state.races, src(), { lastN, decay }) : null;
   }
 
   function renderCard() {
@@ -1008,7 +1055,7 @@
 
   /* ---------- backup ---------- */
   $('#backup').addEventListener('click', () => {
-    const data = { app: 'horsey', version: 1, savedAt: new Date().toISOString(), races: state.races, cards: state.cards, sources: state.sources, fitReport: state.fitReport };
+    const data = { app: 'horsey', version: 1, savedAt: new Date().toISOString(), races: state.races, cards: state.cards, sources: state.sources, fitReport: state.fitReport, autoCalibrate: state.autoCal };
     offerFile(`horsey-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(data, null, 1), 'application/json');
   });
   $('#restore-file').addEventListener('change', async (e) => {
@@ -1022,6 +1069,7 @@
       state.races = r.races;
       if (Array.isArray(data.sources)) state.sources = withNewSources(data.sources);
       if (data.fitReport !== undefined) state.fitReport = data.fitReport;
+      if (data.autoCalibrate !== undefined) state.autoCal = data.autoCalibrate !== false;
       if (data.cards && typeof data.cards === 'object') state.cards = Object.assign({}, state.cards, data.cards);
       flash(`Restored ${f.name}: ${r.added} new, ${r.updated} updated, ${r.unchanged} already saved. Calibration restored.`);
       persist();
@@ -1035,7 +1083,7 @@
     const lastN = Math.max(1, +$('#opt-lastn').value || 6);
     const decay = Math.min(1, Math.max(0.3, +$('#opt-decay').value || 0.8));
     const q = $('#opt-filter').value.trim().toLowerCase();
-    const rows = F.rateHorses(state.races, state.sources, { lastN, decay }).filter((h) => !q || h.horse.toLowerCase().includes(q));
+    const rows = F.rateHorses(state.races, src(), { lastN, decay }).filter((h) => !q || h.horse.toLowerCase().includes(q));
     const srcs = enabled();
     const head = '<tr><th>#</th><th>Horse</th><th class="num">Rating</th><th class="num">Last</th><th class="num">Best</th>' +
       '<th class="num">Top 2 of 3</th><th class="num">Trend</th><th class="num">Starts</th><th class="num">Avg spread</th></tr>';
@@ -1080,21 +1128,26 @@
 
   /* ---------- calibration ---------- */
   function renderCalibration() {
-    const rep = state.fitReport || {};
+    const cal = calibrated();
+    const rep = cal.report || {};
     const ro = !canEdit();
+    const auto = state.autoCal;
+    $('#auto-cal').checked = auto;
+    $('#auto-cal').disabled = ro;
+    $('#fit').hidden = auto;
     const head = '<tr><th>Use</th><th>Product</th><th>Better</th><th>Sheet (lengths)</th><th class="num">Weight</th>' +
       '<th class="num">Intercept</th><th class="num">Slope</th><th class="num">Fit n</th><th class="num">r</th><th class="num">RMSE</th><th>Notes</th></tr>';
-    const body = state.sources.map((s, i) => {
+    const body = cal.sources.map((s, i) => {
       const r = rep[s.id];
       const fitCells = s.anchor ? '<td colspan="3" class="hint">anchor</td>' : !r ? '<td></td><td></td><td></td>' :
         `<td class="num">${r.n}</td><td class="num">${r.fitted ? fmt(Math.abs(r.r), 3) : '–'}</td>` +
-        `<td class="num">${r.fitted ? fmt(r.rmse, 2) : `<span class="hint">${r.n < 5 ? 'too few' : 'skipped'}</span>`}</td>`;
+        `<td class="num">${r.fitted ? fmt(r.rmse, 2) : `<span class="hint">${r.n < (auto ? 20 : 5) ? 'too few' : 'skipped'}</span>`}</td>`;
       const dis = (extra) => (ro || extra ? ' disabled' : '');
       const num = (k, step, extra) => `<td class="num"><input type="number" step="${step}" id="cal-${s.id}-${k}" data-src="${i}" data-key="${k}" value="${s[k]}" style="width:6.5em"${dis(extra)}></td>`;
       return `<tr><td><input type="checkbox" id="cal-${s.id}-enabled" aria-label="Use ${esc(s.name)}" data-src="${i}" data-key="enabled"${s.enabled ? ' checked' : ''}${dis()}></td>` +
         `<td>${esc(s.name)}</td><td>${s.higherIsBetter ? 'higher' : 'lower'}</td>` +
         `<td><input type="checkbox" id="cal-${s.id}-lengthBased" aria-label="${esc(s.name)} is length-based" data-src="${i}" data-key="lengthBased"${s.lengthBased ? ' checked' : ''}${dis(s.anchor)}></td>` +
-        num('weight', 0.1) + num('intercept', 0.5, s.anchor) + num('slope', 0.05, s.anchor) + fitCells +
+        num('weight', 0.1) + num('intercept', 0.5, s.anchor || auto) + num('slope', 0.05, s.anchor || auto) + fitCells +
         `<td class="hint" style="white-space:normal;min-width:220px">${esc(s.note)}</td></tr>`;
     }).join('');
     $('#cal-table').innerHTML = head + body;
@@ -1117,6 +1170,18 @@
     else if (t.value !== '' && Number.isFinite(+t.value)) s[t.dataset.key] = +t.value;
     persist();
   });
+  $('#auto-cal').addEventListener('change', (e) => {
+    if (!canEdit()) return;
+    if (!e.target.checked) {
+      // Keep the fitted values as the starting point for manual edits.
+      const cal = calibrated();
+      state.sources = cal.sources.map((s) => Object.assign({}, s));
+      state.fitReport = cal.report;
+    }
+    state.autoCal = e.target.checked;
+    $('#fit-msg').textContent = state.autoCal ? 'Automatic calibration on.' : 'Automatic calibration off. You can edit intercepts and slopes.';
+    persist();
+  });
   $('#chart-dist').addEventListener('input', renderCalibration);
   $('#fit').addEventListener('click', () => {
     if (!state.races.length) { $('#fit-msg').textContent = 'Import races first.'; return; }
@@ -1128,9 +1193,13 @@
     persist();
   });
   confirmButton($('#reset-cal'), () => 'Replace your calibration with defaults?', () => {
-    state.sources = F.cloneSources();
+    state.sources = F.cloneSources().map((d) => {
+      const cur = state.sources.find((s) => s.id === d.id);
+      return cur ? Object.assign(d, { enabled: cur.enabled, weight: cur.weight }) : d;
+    });
     state.fitReport = null;
-    $('#fit-msg').textContent = 'Defaults restored.';
+    state.autoCal = true;
+    $('#fit-msg').textContent = 'Defaults restored; automatic calibration on.';
     persist();
   });
 

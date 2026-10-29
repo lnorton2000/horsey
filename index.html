@@ -12,6 +12,11 @@
     <h1>Horsey <span>Unified Speed Figures</span></h1>
     <p class="tag">Beyer, Ragozin, Thoro-Graph, Brisnet, TimeformUS, Equibase, ThoroManager &rarr; one number on a Beyer-equivalent scale.</p>
     <p id="save-status" role="status" aria-live="polite">Loading…</p>
+    <div id="relink" class="banner" hidden>
+      <span id="relink-text"></span>
+      <button id="relink-yes" class="primary-btn">Join them</button>
+      <button id="relink-no">Not now</button>
+    </div>
     <div id="migrate" class="banner" hidden>
       <span id="migrate-text"></span>
       <button id="migrate-yes">Add to my account</button>
@@ -136,10 +141,11 @@
       <h2>Calibration</h2>
       <p class="hint">
         Unified = intercept + slope &times; figure &times; (8 &divide; furlongs, for length-based sheets only).
-        Defaults are rules of thumb. With a few dozen races where you hold two or more products,
-        <b>Fit from my data</b> estimates each product's scale against the consensus of the others (Beyer is the fixed anchor).
+        Products run on different scales (ThoroManager and Equibase, for example, run about 10 points above Beyer), so each one is converted before figures are blended or compared.
+        With automatic calibration, each product with at least 20 races that also have another product's figure is fitted from your saved races against the consensus of the others (Beyer is the fixed anchor), and refitted as you add races.
       </p>
       <div class="row">
+        <label><input type="checkbox" id="auto-cal" checked> Calibrate automatically from my races</label>
         <button id="fit">Fit from my data</button>
         <button id="reset-cal">Reset to defaults</button>
         <span id="fit-msg" class="hint"></span>

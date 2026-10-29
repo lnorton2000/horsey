@@ -161,3 +161,31 @@ test('undated races with a month still sort by recency', () => {
   ], F.cloneSources());
   assert.deepEqual(r[0].races.map((x) => x.race.month || x.race.date), ['2026-08', '2026-05-10', '2026-03']);
 });
+
+test('linkRaces joins an undated run to the one matching row only', () => {
+  const races = [
+    { horse: 'Big Apple Patrick', date: '2026-08-02', track: 'RP', distance: '1m', race: '12', finish: '6', call1: '8', beyer: '65' },
+    { horse: 'Big Apple Patrick', track: 'RP', distance: '8f', finish: '6', call1: '8', thoromanager: '74' },
+    // same track and finish but different distance: not the same run
+    { horse: 'Big Apple Patrick', track: 'RP', distance: '6f', finish: '6', call1: '8', thoromanager: '70' },
+    // only the track in common: too little to go on
+    { horse: 'Big Apple Patrick', track: 'RP', equibase: '80' },
+  ];
+  const r = F.linkRaces(races);
+  assert.equal(r.linked, 1);
+  assert.equal(r.races.length, 3);
+  assert.equal(r.races[0].thoromanager, '74');
+  assert.equal(r.races[0].beyer, '65');
+
+  // Two equally good candidates: leave it alone.
+  const amb = F.linkRaces([
+    { horse: 'A', date: '2026-08-02', track: 'CD', distance: '6f', finish: '1', beyer: '80' },
+    { horse: 'A', date: '2026-09-02', track: 'CD', distance: '6f', finish: '1', beyer: '82' },
+    { horse: 'A', track: 'CD', distance: '6f', finish: '1', thoromanager: '90' },
+  ]);
+  assert.equal(amb.linked, 0);
+
+  // mergeRaces links an incoming undated row to a saved dated one.
+  const m = F.mergeRaces([races[0]], [races[1]]);
+  assert.deepEqual([m.races.length, m.added, m.updated, m.linked], [1, 0, 1, 1]);
+});
